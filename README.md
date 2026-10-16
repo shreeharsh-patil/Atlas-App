@@ -1,6 +1,8 @@
 # Meeting Atlas
 
-Meeting Atlas is a native Kotlin and Jetpack Compose meeting recorder designed around local storage. Recordings stay on-device until the user explicitly chooses to create notes. The app then transcribes audio through OpenRouter, asks the selected text model for structured notes and a mind map, saves the results locally, and removes the source audio after the notes are durably stored.
+Meeting Atlas is a native Kotlin and Jetpack Compose meeting recorder with Room-based local storage. Record, save, reopen and play segmented audio offline. Creating notes explicitly sends audio/transcript to OpenRouter, saves the results locally and applies the user's audio-retention setting. The default retains the earlier requested behavior of removing source audio only after notes are saved; turn this off in Settings to preserve playback.
+
+Version 0.4.0 adds the supplied Meeting Atlas logo across the app and launcher, green brand styling, and signed release APK/AAB artifacts. It includes the batch notes engine from 0.3.0. Per the user's selected scope, transcription uses OpenRouter after recording is saved. [V3 implementation](docs/v3-notes.md) describes its contracts and limits; [V2 architecture and slice plan](docs/v2-plan.md) tracks the wider product scope. Device qualification and model-quality review remain required.
 
 ## Current implementation
 
@@ -11,10 +13,20 @@ Meeting Atlas is a native Kotlin and Jetpack Compose meeting recorder designed a
 - Low-power architecture: no live transcription or audio analysis; the service does not refresh the notification every second.
 - Storage segments are rolled at a file-size threshold when the device supports `MediaRecorder.setNextOutputFile`; finalized segments have Room metadata.
 - Startup recovery keeps readable finalized segments and marks unfinished sessions interrupted.
-- OpenRouter transcription and structured meeting notes, including a summary, key points, decisions, action items, and expandable mind-map branches.
+- Room session journal, stable segment identities, integrity checks and bounded technical diagnostics in debug builds. Updating a meeting uses Room Upsert and preserves child data.
+- Media3 playback with one logical timeline, cross-segment seeking, 10-second skip, speed, saved position and standard background playback controls. Capture pauses playback.
+- Timestamped recording/notification bookmarks; edit labels, seek available audio and reopen bookmarks offline.
+- DataStore quality presets (Storage Saver/Balanced/High Quality), device AAC configuration fallback, input-change detection, optional Android 12+ Bluetooth communication routing, Android 10+ silenced-input pause, and 30-second storage checks.
+- Actual microphone amplitude at 10 Hz only with a visible recording waveform subscriber. A contextual recording bar opens the ongoing session from other screens.
+- Explicit whole-meeting deletion, local save errors, and a shared ownership gate that excludes AI processing during recording.
+- Durable WorkManager processing with network/battery constraints, optional charging-only scheduling, bounded retries, pause/resume and Room checkpoints. Completed transcription chunks survive extraction failures.
+- Timestamped OpenRouter batch transcription in streamed two-minute AAC chunks. Provider segment timestamps, approximate chunk intervals and unknown legacy timing remain distinguishable.
+- One normalized knowledge set powers Quick, Standard, Detailed and Study notes plus a saved expandable topic tree. Seven templates guide extraction without adding missing information.
+- Exact transcript quotes, source revisions, per-window coverage accounting, distinct decisions/proposals/actions, evidence-gated owners/deadlines, and chapters only from contiguous provider-timed sources. Structural checks do not prove semantic accuracy.
+- Editable notes, revision history, protected manual edits, separately retained AI candidates, highlights, action completion, topic renaming/collapse, scoped refresh, paged transcript search and Markdown export with evidence.
 - The OpenRouter API key is encrypted with an AES-GCM key held in Android Keystore. Model IDs can be changed in Settings.
 - Audio is sent only after the user confirms on the meeting screen. Transcript and audio are sent to OpenRouter for processing; provider retention and model pricing depend on the configured models.
-- Source audio is deleted only after a complete transcript, summary, and mind map are saved to Room. If processing fails, the local recording is kept. Transcript and generated notes remain locally available offline.
+- With the audio-retention policy enabled, source audio is removed only after nonempty final notes and evidence are committed to Room. Failed, paused, interrupted, no-speech and empty-notes runs keep audio. Cleanup can be retried separately. Transcript and notes remain available offline. `openrouter/free` is the text-model default with no paid text fallback; Whisper transcription is billed separately by OpenRouter.
 
 ## Architecture
 
@@ -23,7 +35,8 @@ The initial app is kept as one Android Gradle module to keep the first increment
 - `ui`: Compose screens, theme, and ViewModel.
 - `data`: Room entities, DAOs, database, and repository.
 - `recording`: foreground service, recorder file handling, process state, and recovery.
-- `ai`: Android Keystore-backed OpenRouter key storage, short AAC chunk preparation, transcription and structured summary requests, and post-save audio cleanup.
+- `ai`: Android Keystore-backed OpenRouter key storage and cancellation-aware streaming HTTP requests.
+- `notes`: WorkManager orchestration, AAC remuxing, typed extraction/validation, transactional merges, shared view projections and export.
 - `di`: Hilt storage providers.
 
 Room is the catalog source of truth. Audio is stored under app-private `files/recordings/<meeting-id>/`, never in cache. The service is independent of Activity lifetime and serializes user commands. Recording status is persisted at state transitions rather than once per timer tick. The current recorder uses a preferred 24 kHz AAC configuration and retries with the platform default sample rate if preparation fails.
@@ -35,6 +48,11 @@ Requirements: JDK 17+, Android SDK Platform 36, and Android Gradle Plugin-compat
 ```powershell
 ./gradlew.bat :app:assembleDebug
 ./gradlew.bat :app:testDebugUnitTest
+./gradlew.bat :app:assembleDebugAndroidTest
+./gradlew.bat :app:lintDebug
+python tools/check_migrations.py
+# With a connected Android device:
+./gradlew.bat :app:connectedDebugAndroidTest
 ```
 
 Installable debug APK output is `app/build/outputs/apk/debug/app-debug.apk`.
@@ -43,8 +61,8 @@ Installable debug APK output is `app/build/outputs/apk/debug/app-debug.apk`.
 
 The microphone foreground service follows Android's visible-start and runtime-permission rules. Android cannot guarantee uninterrupted capture after force-stop, permission revocation, reboot, storage exhaustion, or manufacturer process termination. The app preserves readable finalized segments and marks incomplete sessions interrupted when it can recover them. MediaRecorder file rollover is size-based, not an exact-duration guarantee, and some devices may not support rollover reliably.
 
-No physical-device session, long-duration recording, battery profile, interruption, or recovery test has been completed in this workspace. Do not treat this increment as release-ready. Before a production release, exercise screen-off recording, notification controls, pause/resume, low storage, process termination, and 1+ hour sessions on several real devices.
+The signed Android release is prepared for installation and Play Console testing. No physical-device session, long-duration recording or battery profile has been completed, and no Play Store submission has been made. See [release preparation](docs/release.md), [verification status](docs/verification.md), and [device/performance qualification](docs/performance.md).
 
 ## Current limitations
 
-Playback, audio import, transcript editing, meeting Q&A, search, backup/export, encrypted audio at rest, and performance instrumentation are not implemented yet. Transcription uses OpenRouter's configured speech-to-text model. Long recordings are repackaged into short audio chunks before upload; long transcripts are condensed in sections before final notes are generated. Confirm your chosen models, provider data handling, and pricing in OpenRouter before processing private meetings.
+Live processing is deferred by the user's choice to keep OpenRouter batch transcription. Audio import, on-device inference, transcript correction history, meeting Q&A, global FTS, a pan/zoom graph with saved viewport/relationship edges, outside-knowledge expansion, cross-meeting tasks, portable backup/restore and encrypted audio at rest remain future work. The current mind map is a saved expandable topic tree. Older notes/maps remain readable, and their transcript is migrated only when explicitly processed. No actual cloud request, physical-device recording, battery measurement or model-quality evaluation has been performed for this version. Recovery cannot reconstruct unreadable audio or guarantee original timestamp alignment across missing middle segments.

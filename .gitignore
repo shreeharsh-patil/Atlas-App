@@ -11,3 +11,4 @@ Thumbs.db
 *.m4a
 *.wav
 *.mp3
+.release/

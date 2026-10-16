@@ -55,8 +55,9 @@ class AudioChunker @Inject constructor(@ApplicationContext context: Context) {
             val info = MediaCodec.BufferInfo()
 
             fun finishChunk() {
-                muxer?.let { runCatching { it.stop() }; it.release() }
+                val finished = muxer
                 muxer = null
+                finished?.let { try { it.stop() } finally { it.release() } }
                 currentOutput?.takeIf { it.length() > MIN_AUDIO_CHUNK_BYTES }?.let(output::add)
                 currentOutput = null
                 trackIndex = -1
@@ -77,7 +78,11 @@ class AudioChunker @Inject constructor(@ApplicationContext context: Context) {
                     muxer!!.start()
                     chunkStartUs = sampleTime
                 }
-                info.set(0, size, (sampleTime - chunkStartUs).coerceAtLeast(0), extractor.sampleFlags)
+                val flags = extractor.sampleFlags
+                check(flags and MediaExtractor.SAMPLE_FLAG_ENCRYPTED == 0) { "Encrypted audio cannot be prepared for transcription." }
+                val codecFlags = (if (flags and MediaExtractor.SAMPLE_FLAG_SYNC != 0) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0) or
+                    (if (flags and MediaExtractor.SAMPLE_FLAG_PARTIAL_FRAME != 0) MediaCodec.BUFFER_FLAG_PARTIAL_FRAME else 0)
+                info.set(0, size, (sampleTime - chunkStartUs).coerceAtLeast(0), codecFlags)
                 muxer!!.writeSampleData(trackIndex, sampleBuffer, info)
                 extractor.advance()
             }

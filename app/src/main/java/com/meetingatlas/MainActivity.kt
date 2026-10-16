@@ -19,7 +19,9 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         lifecycleScope.launch {
-            RecordingRecoveryManager(this@MainActivity, database.meetingDao(), database.audioSegmentDao()).recoverInterruptedSessions()
+            try { RecordingRecoveryManager(applicationContext, database).recoverInterruptedSessions() }
+            catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+            catch (_: Exception) { android.widget.Toast.makeText(this@MainActivity, "Audio files were kept, but recovery could not finish. Reopen the app to retry.", android.widget.Toast.LENGTH_LONG).show() }
         }
         setContent {
             MeetingAtlasTheme {

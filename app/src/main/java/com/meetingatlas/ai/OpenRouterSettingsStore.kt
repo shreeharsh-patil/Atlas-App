@@ -41,13 +41,14 @@ class OpenRouterSettingsStore @Inject constructor(@ApplicationContext context: C
     fun hasApiKey(): Boolean = encrypted.contains(KEY_CIPHER_TEXT)
 
     fun deleteApiKey() {
-        encrypted.edit().remove(KEY_CIPHER_TEXT).apply()
+        check(encrypted.edit().remove(KEY_CIPHER_TEXT).commit()) { "Could not remove the saved key." }
     }
 
     fun model(): String = preferences.getString(KEY_MODEL, DEFAULT_MODEL).orEmpty().ifBlank { DEFAULT_MODEL }
-    fun saveModel(value: String) { preferences.edit().putString(KEY_MODEL, value.trim()).apply() }
+    fun saveModels(model: String, transcriptionModel: String) {
+        check(preferences.edit().putString(KEY_MODEL, model.trim().ifBlank { DEFAULT_MODEL }).putString(KEY_STT_MODEL, transcriptionModel.trim().ifBlank { DEFAULT_STT_MODEL }).commit()) { "Could not save model choices." }
+    }
     fun transcriptionModel(): String = preferences.getString(KEY_STT_MODEL, DEFAULT_STT_MODEL).orEmpty().ifBlank { DEFAULT_STT_MODEL }
-    fun saveTranscriptionModel(value: String) { preferences.edit().putString(KEY_STT_MODEL, value.trim()).apply() }
 
     private fun secretKey(): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEY_STORE).apply { load(null) }

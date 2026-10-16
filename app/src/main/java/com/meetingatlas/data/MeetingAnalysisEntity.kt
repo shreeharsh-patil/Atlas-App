@@ -41,4 +41,7 @@ interface MeetingAnalysisDao {
 
     @Query("UPDATE meeting_analysis SET audioDeletedAt = :deletedAt WHERE meetingId = :meetingId")
     suspend fun markAudioDeleted(meetingId: String, deletedAt: Long)
+
+    @Query("UPDATE meeting_analysis SET transcript = '' WHERE meetingId=:meetingId")
+    suspend fun clearMigratedTranscript(meetingId: String)
 }

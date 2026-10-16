@@ -1,48 +1,39 @@
 package com.meetingatlas.recording
 
 import android.content.Context
-import android.media.MediaMetadataRetriever
-import com.meetingatlas.data.AudioSegmentDao
-import com.meetingatlas.data.AudioSegmentEntity
-import com.meetingatlas.data.MeetingDao
-import com.meetingatlas.data.RecordingStatus
-import java.io.File
-import java.util.UUID
+import androidx.room.withTransaction
+import com.meetingatlas.data.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
-class RecordingRecoveryManager(
-    context: Context,
-    private val meetings: MeetingDao,
-    private val segments: AudioSegmentDao,
-) {
-    private val root = File(context.filesDir, "recordings")
+class RecordingRecoveryManager(context: Context, private val db: MeetingDatabase) {
+    private val files = RecordingFileManager(context.applicationContext)
+    private val inspector = SegmentInspector()
 
-    suspend fun recoverInterruptedSessions() {
-        if (MeetingRecordingService.serviceAlive) return
-        for (meeting in meetings.unfinished()) {
-            val candidates = File(root, meeting.id).listFiles { file -> file.extension == "m4a" }.orEmpty().sortedBy { it.name }
-            var offset = 0L
-            val valid = candidates.mapIndexedNotNull { index, file ->
-                val duration = durationOf(file)
-                if (duration == null || file.length() <= 1024) return@mapIndexedNotNull null
-                AudioSegmentEntity(UUID.randomUUID().toString(), meeting.id, index + 1, file.absolutePath, offset, duration, file.length(), "RECOVERED")
-                    .also { offset += duration }
+    suspend fun recoverInterruptedSessions() = withContext(Dispatchers.IO) {
+        if (!AudioWorkCoordinator.startRecovery()) return@withContext
+        try {
+            for (meeting in db.meetingDao().unfinished()) {
+                val candidates = files.segments(meeting.id)
+                val previous = db.recordingJournalDao().session(meeting.id)
+                // A prepared UI draft is not an interrupted capture. Rotation/reopening must keep it startable.
+                if (meeting.recordingStatus == RecordingStatus.PREPARING && meeting.startedAt == null && previous == null && candidates.isEmpty()) continue
+                var offset = 0L
+                val entries = candidates.map { file ->
+                    val number = file.name.substringAfter("segment-").substringBefore('.').toInt()
+                    val check = inspector.inspect(file)
+                    segmentEntry(meeting.id, number, file.absolutePath, check, offset, recovered = true).also { offset += it.durationMs }
+                }
+                val valid = entries.filter { it.durationMs > 0 }
+                db.withTransaction {
+                    db.audioSegmentDao().deleteForMeeting(meeting.id)
+                    if (entries.isNotEmpty()) db.audioSegmentDao().insertAll(entries)
+                    db.meetingDao().finish(meeting.id, if (valid.isEmpty()) RecordingStatus.FAILED else RecordingStatus.INTERRUPTED, offset, valid.firstOrNull()?.localPath, System.currentTimeMillis(),
+                        if (valid.isEmpty()) "The session ended before playable audio was finalized. Incomplete files were kept." else "Recording ended unexpectedly. Playable segments were recovered; an unfinished segment may be missing.")
+                    db.recordingJournalDao().saveSession((previous ?: RecordingSessionEntity(meeting.id, "BALANCED", "INTERRUPTED", updatedAt = System.currentTimeMillis())).copy(state = "INTERRUPTED", elapsedMs = offset, updatedAt = System.currentTimeMillis()))
+                    db.recordingJournalDao().event(RecordingEventEntity(meetingId = meeting.id, type = "RECOVERED", detail = "valid=${valid.size}; invalid=${entries.size - valid.size}; duration=$offset"))
+                }
             }
-            if (valid.isNotEmpty()) segments.insertAll(valid)
-            meetings.finish(
-                meeting.id,
-                RecordingStatus.INTERRUPTED,
-                maxOf(meeting.durationMs, offset),
-                valid.firstOrNull()?.localPath,
-                System.currentTimeMillis(),
-                "Recording ended unexpectedly. Recoverable audio has been kept.",
-            )
-        }
+        } finally { AudioWorkCoordinator.finishRecovery() }
     }
-
-    private fun durationOf(file: File): Long? = try {
-        MediaMetadataRetriever().run {
-            setDataSource(file.absolutePath)
-            extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull().also { release() }
-        }
-    } catch (_: Exception) { null }
 }

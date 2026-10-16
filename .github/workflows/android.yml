@@ -16,5 +16,9 @@ jobs:
       - uses: android-actions/setup-android@v3
       - name: Install Android SDK components
         run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
-      - name: Build, lint, and test
-        run: ./gradlew --no-daemon :app:lintDebug :app:testDebugUnitTest :app:assembleDebug
+      - name: Build app, device tests, and run unit tests
+        run: ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest
+      - name: Lint after generated sources are stable
+        run: ./gradlew --no-daemon :app:lintDebug
+      - name: Verify SQLite migration structure and preserved content
+        run: python3 tools/check_migrations.py

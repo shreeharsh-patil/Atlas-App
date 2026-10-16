@@ -17,11 +17,13 @@ private val Dark = Color(0xFF171C19)
 fun MeetingAtlasTheme(content: @Composable () -> Unit) {
     val colors = if (isSystemInDarkTheme()) darkColorScheme(
         primary = Color(0xFFB5D5C2), onPrimary = Color(0xFF173127),
+        primaryContainer = Color(0xFF293E32), onPrimaryContainer = Color(0xFFD9E9DD),
         background = Dark, surface = Color(0xFF212823), onBackground = Color(0xFFE7EAE5),
         onSurface = Color(0xFFE7EAE5), secondary = Color(0xFFAAB5AD), outline = Color(0xFF39463E),
         surfaceVariant = Color(0xFF29332D), secondaryContainer = Color(0xFF2B3B31),
     ) else lightColorScheme(
         primary = Green, onPrimary = Color.White, background = Paper, surface = Color(0xFFFFFEFA),
+        primaryContainer = Color(0xFFE2EAE3), onPrimaryContainer = Ink,
         onBackground = Ink, onSurface = Ink, secondary = Muted, outline = Color(0xFFE1E4DD),
         surfaceVariant = Color(0xFFEAEEE7), secondaryContainer = Color(0xFFE6EEE7),
     )

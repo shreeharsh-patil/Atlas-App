@@ -1,4 +1,6 @@
-# Initial architecture and implementation plan
+# Architecture overview
+
+The implemented batch pipeline is documented in [V3 notes](v3-notes.md). The wider implementation sequence is [Meeting Atlas V2](v2-plan.md). [Verification](verification.md) separates executed host checks from pending device tests; [performance qualification](performance.md) defines the real-device matrix without invented results.
 
 ## Phase 1 boundary
 
@@ -20,11 +22,12 @@ The first increment keeps a single Android module so the project can stay builda
 - A MediaRecorder rollover is best effort: the device determines callback timing and encoded file behavior. It is not an exact-time split and does not make an unfinalized MP4 recoverable.
 - App-private storage and disabled Android backup avoid accidental system backup of meeting content. Uninstalling can remove app-private content; an explicit archive/restore feature is still planned.
 
-## Next increments
+## Next increments (V2 slice order)
 
-1. Make recorder recovery and segmented playback robust across physical devices; add a segment manifest migration and file validation.
-2. Add Media3 playback and import through Android's document picker.
-3. Add editable local transcript, summary, decisions, action items, and search models.
-4. Add opt-in AI processing behind explicit consent; persist validated results locally before showing them.
-5. Add persistent mind-map graph, evidence-linked expansion, and grounded Q&A.
-6. Add encrypted export/restore, accessibility, performance testing, CI, and release hardening.
+1. Qualify the implemented journal, validated recovery and Media3 playback on devices.
+2. Complete long-session, background and battery qualification before enabling heavy local AI.
+3. Qualify implemented WorkManager checkpoints and timestamped batch transcripts; add transcript correction history and global FTS.
+4. Evaluate implemented source-linked notes, chapters, action completion, templates and revision protection on real meetings.
+5. Migrate maps into transactional graph records; persist expansion, edits and viewport state.
+6. Add cited Q&A and cross-meeting retrieval.
+7. Complete adaptive navigation, import/export, encrypted restore, accessibility and release qualification.

@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Upsert
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -17,7 +18,7 @@ interface MeetingDao {
     @Query("SELECT * FROM meetings WHERE recordingStatus IN ('RECORDING', 'PAUSED', 'PREPARING')")
     suspend fun unfinished(): List<MeetingEntity>
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Upsert
     suspend fun upsert(meeting: MeetingEntity)
 
     @Query("DELETE FROM meetings WHERE id = :id")
@@ -43,6 +44,9 @@ interface MeetingDao {
 interface AudioSegmentDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(segments: List<AudioSegmentEntity>)
+
+    @Query("UPDATE audio_segments SET validationStatus = 'WRITING' WHERE meetingId = :meetingId AND sequence = :sequence")
+    suspend fun markWriting(meetingId: String, sequence: Int)
 
     @Query("SELECT * FROM audio_segments WHERE meetingId = :meetingId ORDER BY sequence")
     fun observeForMeeting(meetingId: String): Flow<List<AudioSegmentEntity>>

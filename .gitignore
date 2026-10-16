@@ -1,0 +1,13 @@
+.gradle/
+.wrapper-bootstrap/
+**/build/
+local.properties
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+*.jks
+*.keystore
+*.m4a
+*.wav
+*.mp3

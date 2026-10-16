@@ -8,6 +8,7 @@ import android.os.SystemClock
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -145,13 +146,41 @@ internal fun RecordingScreenV2(meeting: MeetingEntity?, viewModel: HomeViewModel
                     Text(meeting?.title ?: "New meeting", style = MaterialTheme.typography.titleMedium, maxLines = 3)
                 }
             }
-            Spacer(Modifier.height(64.dp))
-            Text(when { recording -> "Recording"; paused -> "Paused"; finalizing -> "Saving audio"; meeting?.recordingStatus == RecordingStatus.FAILED -> "Recording failed"; meeting?.recordingStatus == RecordingStatus.INTERRUPTED -> "Recording interrupted"; finished -> "Recording saved"; current || starting -> "Preparing microphone"; else -> "Ready to record" }, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge, modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite })
-            Spacer(Modifier.height(16.dp))
-            Text(formatRecordingTime(elapsed), fontSize = 42.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Normal)
-            Spacer(Modifier.height(24.dp))
-            MicrophoneWaveform(recording)
-            Spacer(Modifier.height(24.dp))
+            val statusText = when {
+                recording -> "Recording"
+                paused -> "Paused"
+                finalizing -> "Saving audio"
+                meeting?.recordingStatus == RecordingStatus.FAILED -> "Recording failed"
+                meeting?.recordingStatus == RecordingStatus.INTERRUPTED -> "Recording interrupted"
+                finished -> "Recording saved"
+                current || starting -> "Preparing microphone"
+                else -> "Ready to record"
+            }
+            Surface(
+                modifier = Modifier.fillMaxWidth().padding(top = 34.dp),
+                color = MaterialTheme.colorScheme.surface,
+                shape = RoundedCornerShape(24.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            ) {
+                Column(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(50)) {
+                        Text(
+                            statusText,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            style = MaterialTheme.typography.labelLarge,
+                        )
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    Text(formatRecordingTime(elapsed), fontSize = 48.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Normal)
+                    Spacer(Modifier.height(8.dp))
+                    MicrophoneWaveform(recording)
+                }
+            }
+            Spacer(Modifier.height(18.dp))
             Text(if (current) health.input else "${options.quality.label} · about ${options.quality.megabytesPerHour} MB/hour", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodyMedium)
             if (current) Text("Continues with the screen locked", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
             health.warning?.takeIf { current }?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 16.dp)) }

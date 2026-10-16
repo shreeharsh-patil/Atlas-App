@@ -2,7 +2,7 @@
 
 Meeting Atlas is a native Kotlin and Jetpack Compose meeting recorder with Room-based local storage. Record, save, reopen and play segmented audio offline. Creating notes explicitly sends audio/transcript to OpenRouter, saves the results locally and applies the user's audio-retention setting. The default retains the earlier requested behavior of removing source audio only after notes are saved; turn this off in Settings to preserve playback.
 
-Version 0.4.0 adds the supplied Meeting Atlas logo across the app and launcher, green brand styling, and signed release APK/AAB artifacts. It includes the batch notes engine from 0.3.0. Per the user's selected scope, transcription uses OpenRouter after recording is saved. [V3 implementation](docs/v3-notes.md) describes its contracts and limits; [V2 architecture and slice plan](docs/v2-plan.md) tracks the wider product scope. Device qualification and model-quality review remain required.
+Version 0.4.1 refines home and recording screens, makes meeting lists lazy, and reduces repeated sorting/filtering work in notes. Version 0.4.0 added the supplied Meeting Atlas logo across the app and launcher, green brand styling, and signed release artifacts. Per the user's selected scope, transcription uses OpenRouter after recording is saved. [V3 implementation](docs/v3-notes.md) describes its contracts and limits; [V2 architecture and slice plan](docs/v2-plan.md) tracks the wider product scope. Device qualification and model-quality review remain required.
 
 ## Current implementation
 

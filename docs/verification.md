@@ -1,5 +1,12 @@
 # V3 verification
 
+## V0.4.1 UI and performance checks (16 October 2026)
+
+- Debug and release builds package the updated Compose UI. Debug and release lint both completed with 0 errors (35 advisory warnings each). The release screen was installed and visually checked on the Android 16 / API 36 emulator: [updated home screen](screenshots/v4-ui-release-home.png).
+- The home meeting list now uses lazy composition. Meeting labels and note topic/chapter groupings are reused across recompositions; state flows on detail/settings now stop collecting while their screen is not active.
+- No test suite or physical-device performance benchmark was run for this UI iteration. See [performance procedure](performance.md) for measurements still needed on real devices.
+- APK SHA-256: `C6DE2A21AD892AF90EF1AAB2F545D206E00490BE53BCF80096254DD78B389995`; AAB SHA-256: `5BFCDB7B1F566073608A0C0E642503C5870528A539DA224EBAA87D36D996324C`.
+
 ## V0.4 release checks (16 October 2026)
 
 - Release APK and AAB built successfully with R8 and resource shrinking; both artifact signatures verified. Release lint passed with **0 errors and 35 advisory warnings** (`app/build/reports/lint-results-release.html`). Debug lint also passed.

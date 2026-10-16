@@ -67,7 +67,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -224,56 +223,72 @@ private fun HomeScreen(
     onMeeting: (MeetingEntity) -> Unit,
     onNewRecording: () -> Unit,
 ) {
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 22.dp)) {
-        Spacer(Modifier.height(22.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Image(
-                painter = painterResource(com.meetingatlas.R.drawable.meeting_atlas_mark),
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.size(44.dp),
-            )
-            Spacer(Modifier.width(10.dp))
-            Column(Modifier.weight(1f)) {
-                Text("MEETING ATLAS", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.4.sp)
-                Text("Recordings and meeting notes", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+    val recentMeetings = remember(meetings) { meetings.take(5) }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(start = 22.dp, top = 22.dp, end = 22.dp, bottom = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
+    ) {
+        item(key = "brand-header") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(
+                    painter = painterResource(com.meetingatlas.R.drawable.meeting_atlas_mark),
+                    contentDescription = null,
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.size(44.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("MEETING ATLAS", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.4.sp)
+                    Text("Recordings and meeting notes", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
+                }
+                IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings", tint = MaterialTheme.colorScheme.secondary) }
             }
-            IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings", tint = MaterialTheme.colorScheme.secondary) }
         }
-        Spacer(Modifier.height(30.dp))
-        Text("Meetings", style = MaterialTheme.typography.headlineLarge, lineHeight = 39.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.6).sp)
-        Spacer(Modifier.height(10.dp))
-        Text("Record a conversation. Keep the decisions and next steps.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.secondary)
-        Spacer(Modifier.height(22.dp))
-        Button(
-            onClick = onNewRecording,
-            modifier = Modifier.fillMaxWidth().height(58.dp),
-            shape = RoundedCornerShape(16.dp),
-        ) {
-            Icon(Icons.Default.Mic, contentDescription = null)
-            Spacer(Modifier.width(9.dp))
-            Text(if (activeSession == null) "Start a recording" else "Return to recording", fontWeight = FontWeight.SemiBold)
+        item(key = "home-intro") {
+            Column(Modifier.padding(top = 30.dp)) {
+                Text("Meetings", style = MaterialTheme.typography.headlineLarge, lineHeight = 39.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.6).sp)
+                Spacer(Modifier.height(8.dp))
+                Text("Record a conversation. Keep the decisions and next steps.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.secondary)
+            }
         }
-        Spacer(Modifier.height(32.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Recent", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            TextButton(onClick = onLibrary) { Text("All meetings") }
+        item(key = "record-action") {
+            Button(
+                onClick = onNewRecording,
+                modifier = Modifier.fillMaxWidth().padding(top = 22.dp).heightIn(min = 58.dp),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Icon(Icons.Default.Mic, contentDescription = null)
+                Spacer(Modifier.width(9.dp))
+                Text(if (activeSession == null) "Start a recording" else "Return to recording", fontWeight = FontWeight.SemiBold)
+            }
         }
-        Spacer(Modifier.height(8.dp))
-        if (meetings.isEmpty()) {
-            Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(18.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) {
-                Column(Modifier.fillMaxWidth().padding(18.dp)) {
-                    Text("Your first meeting starts here", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
-                    Spacer(Modifier.height(4.dp))
-                    Text("Recordings stay on this device until you choose to process them.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary)
+        item(key = "recent-heading") {
+            Row(Modifier.padding(top = 28.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("Recent", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                TextButton(onClick = onLibrary) { Text("All meetings") }
+            }
+        }
+        if (recentMeetings.isEmpty()) {
+            item(key = "empty-library") {
+                Surface(
+                    modifier = Modifier.padding(top = 2.dp),
+                    color = MaterialTheme.colorScheme.surface,
+                    shape = RoundedCornerShape(18.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                        Text("No recordings yet", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+                        Text("Start a recording here. Saved audio stays on this device until you choose to create notes.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary)
+                    }
                 }
             }
         } else {
-            Column(verticalArrangement = Arrangement.spacedBy(9.dp)) {
-                meetings.take(5).forEach { MeetingRow(it, onClick = { onMeeting(it) }) }
+            items(recentMeetings, key = { "recent-${it.id}" }) { meeting ->
+                MeetingRow(meeting, onClick = { onMeeting(meeting) }, modifier = Modifier.padding(bottom = 9.dp))
             }
         }
-        Spacer(Modifier.height(16.dp))
+        item(key = "home-bottom-space") { Spacer(Modifier.height(6.dp)) }
     }
 }
 
@@ -300,24 +315,38 @@ private fun LibraryScreen(meetings: List<MeetingEntity>, onBack: () -> Unit, onM
 }
 
 @Composable
-private fun MeetingRow(meeting: MeetingEntity, onClick: () -> Unit) {
+private fun MeetingRow(meeting: MeetingEntity, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val createdLabel = remember(meeting.createdAt) {
+        DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(meeting.createdAt))
+    }
+    val isActive = meeting.recordingStatus in setOf(RecordingStatus.PREPARING, RecordingStatus.RECORDING, RecordingStatus.PAUSED)
     Surface(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
         color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
     ) {
         Row(Modifier.padding(horizontal = 15.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(40.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)), Alignment.Center) {
-                Text(DateFormat.getDateInstance(DateFormat.SHORT).format(Date(meeting.createdAt)).substringBefore("/").trim(), color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
+                Icon(Icons.Default.Mic, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(19.dp))
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
                 Text(meeting.title, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(3.dp))
-                Text("${DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(meeting.createdAt))}  ·  ${durationLabel(meeting.durationMs)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                Text("$createdLabel  ·  ${durationLabel(meeting.durationMs)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
             }
-            Text(statusLabel(meeting.recordingStatus), style = MaterialTheme.typography.labelSmall, color = if (meeting.recordingStatus == RecordingStatus.RECORDING) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary)
+            Surface(
+                color = if (isActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                shape = CircleShape,
+            ) {
+                Text(
+                    statusLabel(meeting.recordingStatus),
+                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.secondary,
+                )
+            }
         }
     }
 }
@@ -329,7 +358,7 @@ private fun MeetingDetailScreen(
     onBack: () -> Unit,
     onSettings: () -> Unit,
 ) {
-    val analysis by viewModel.observeAnalysis(meeting.id).collectAsState(initial = null)
+    val analysis by remember(meeting.id) { viewModel.observeAnalysis(meeting.id) }.collectAsStateWithLifecycle(initialValue = null)
     val notes by remember(meeting.id) { viewModel.observeNotes(meeting.id) }.collectAsStateWithLifecycle(initialValue = null)
     var previousNotes by rememberSaveable(meeting.id) { mutableStateOf(false) }
     BackHandler(previousNotes) { previousNotes = false }
@@ -347,7 +376,7 @@ private fun MeetingDetailScreen(
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
     val capturing by com.meetingatlas.recording.AudioWorkCoordinator.recording.collectAsStateWithLifecycle()
     if (diagnostics && BuildConfig.DEBUG) { RecordingDiagnostics(meeting.id, viewModel) { diagnostics = false }; return }
-    val processing by viewModel.processing.collectAsState()
+    val processing by viewModel.processing.collectAsStateWithLifecycle()
     var selectedTab by rememberSaveable(meeting.id) { mutableStateOf(DetailTab.SUMMARY) }
     var showUploadDialog by rememberSaveable(meeting.id) { mutableStateOf(false) }
     var template by rememberSaveable(meeting.id) { mutableStateOf(com.meetingatlas.notes.MeetingTemplate.GENERAL) }
@@ -617,8 +646,8 @@ private fun SettingsScreen(viewModel: HomeViewModel, onBack: () -> Unit) {
     var apiKey by rememberSaveable { mutableStateOf("") }
     var model by rememberSaveable { mutableStateOf(savedSettings.model) }
     var transcriptionModel by rememberSaveable { mutableStateOf(savedSettings.transcriptionModel) }
-    val hasSavedKey by viewModel.hasOpenRouterKey.collectAsState()
-    val message by viewModel.settingsMessage.collectAsState()
+    val hasSavedKey by viewModel.hasOpenRouterKey.collectAsStateWithLifecycle()
+    val message by viewModel.settingsMessage.collectAsStateWithLifecycle()
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 22.dp)) {
         Spacer(Modifier.height(18.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {

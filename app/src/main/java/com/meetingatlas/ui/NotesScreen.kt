@@ -83,7 +83,7 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
     var confirmRetranscribe by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val template = MeetingTemplate.valueOf(document.state.template)
-    val activeJobs = jobs.filter { it.status in setOf("QUEUED", "RUNNING", "WAITING", "TRANSCRIBING", "EXTRACTING") }
+    val activeJobs = remember(jobs) { jobs.filter { it.status in setOf("QUEUED", "RUNNING", "WAITING", "TRANSCRIBING", "EXTRACTING") } }
     val latestFailure = jobs.firstOrNull { it.status in setOf("FAILED", "CANCELLED") }
     val cleanupWarning = if (document.state.audioDeletedAt == null) jobs.firstOrNull { it.status == "SUCCEEDED" && it.error != null }?.error else null
     val canRefresh = activeJobs.isEmpty() && document.state.status in setOf("FINALIZED", "PARTIAL_AUDIO")
@@ -100,6 +100,10 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
         }
     }
     val visible = remember(document.entries, view) { SummaryProjection.select(document.entries, view) }
+    val visibleByTopic = remember(visible) { visible.groupBy { it.topicId } }
+    val entriesInMapByTopic = remember(document.entries) { document.entries.filter { it.inMap }.groupBy { it.topicId } }
+    val orderedTopics = remember(document.topics) { document.topics.sortedBy { it.position } }
+    val orderedChapters = remember(document.chapters) { document.chapters.sortedBy { it.startMs } }
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }, topBar = {
         TopAppBar(title = { Text(meeting.title, maxLines = 2, style = MaterialTheme.typography.titleMedium) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } }, actions = {
             Box {
@@ -156,12 +160,12 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
                         SummaryView.entries.forEach { mode -> FilterChip(selected = view == mode, onClick = { view = mode }, label = { Text(mode.name.lowercase().replaceFirstChar { it.uppercase() }) }) }
                     }
                 }
-                if (document.chapters.isNotEmpty() && view == SummaryView.DETAILED) item(key = "chapters") {
-                    NotePanel("Chapters") { document.chapters.sortedBy { it.startMs }.forEach { c -> TextButton(onClick = { chapter = c }) { Text("${formatRecordingTime(c.startMs)} · ${c.title}") } } }
+                if (orderedChapters.isNotEmpty() && view == SummaryView.DETAILED) item(key = "chapters") {
+                    NotePanel("Chapters") { orderedChapters.forEach { c -> TextButton(onClick = { chapter = c }) { Text("${formatRecordingTime(c.startMs)} · ${c.title}") } } }
                 }
                 if (visible.isEmpty()) item(key = "empty-notes") { Text(if (view == SummaryView.STUDY) "No educational definitions, formulas, examples or explanations have been saved from this meeting." else "No notes saved in this view yet. Completed transcript segments are available in Transcript.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary) }
-                document.topics.sortedBy { it.position }.forEach { topic ->
-                    val notes = visible.filter { it.topicId == topic.id }
+                orderedTopics.forEach { topic ->
+                    val notes = visibleByTopic[topic.id].orEmpty()
                     if (notes.isNotEmpty()) {
                         item(key = "heading-${topic.id}") {
                             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -187,14 +191,14 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
                 if (transcript.isEmpty()) item(key = "no-sources") { Text("No matching finalized transcript segments are saved yet.") }
             } else {
                 item(key = "map-root") { Text(meeting.title, style = MaterialTheme.typography.headlineSmall); Text("Saved topics and evidence from your notes", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary) }
-                items(document.topics.sortedBy { it.position }, key = { it.id }) { topic ->
+                items(orderedTopics, key = { it.id }) { topic ->
                     NotePanel {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             IconButton(onClick = { viewModel.collapseTopic(topic.id, !topic.collapsed) }) { Icon(if (topic.collapsed) Icons.Default.ChevronRight else Icons.Default.ExpandMore, if (topic.collapsed) "Expand topic" else "Collapse topic") }
                             Text(topic.title, modifier = Modifier.weight(1f).clickable { selectedTopic = topic }, style = MaterialTheme.typography.titleMedium)
                             IconButton(onClick = { selectedTopic = topic }) { Icon(Icons.Default.MoreHoriz, "Topic details") }
                         }
-                        if (!topic.collapsed) document.entries.filter { it.topicId == topic.id && it.inMap }.forEach { entry ->
+                        if (!topic.collapsed) entriesInMapByTopic[topic.id].orEmpty().forEach { entry ->
                             Row(Modifier.fillMaxWidth().clickable { selectedEntry = entry }.padding(start = 22.dp, top = 10.dp, bottom = 10.dp)) { Text("•  ", color = MaterialTheme.colorScheme.primary); Text(entry.text, style = MaterialTheme.typography.bodyMedium) }
                         }
                     }

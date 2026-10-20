@@ -20,8 +20,8 @@
   - 2 notes-contract tests
 - Release APK and AAB built successfully with R8 and resource shrinking; the APK
   signature was verified with `apksigner` against the local upload key.
-- APK SHA-256: `CD02719C38F43C07B364E4C2C3D2D88995AF889D3A93CF2C19F504CF7A2D6AA4`.
-- AAB SHA-256: `77ADA79CE3F9ECD88AA5C3F19BDD208C3A405B96BAFDC52D0D84140E0FA4DEA6`.
+- APK SHA-256: `1E60A37FA443794D8F1D113979CFDE334692294069BBD012A356F6452A249AAC`.
+- AAB SHA-256: `737DF2C92D0B3574F2A22BA8E411725AC20D59BD84F0BECBABA7DF081DCF575E`.
 - The host SQLite migration check now derives its target version from the exported
   schemas instead of a hard-coded number, and asserts that a migration exists for every
   schema version.

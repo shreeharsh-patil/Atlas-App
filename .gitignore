@@ -22,3 +22,6 @@ Thumbs.db
 *.ogg
 *.opus
 *.webm
+
+# Built release artifacts are published to GitHub Releases, not committed.
+release-artifacts/

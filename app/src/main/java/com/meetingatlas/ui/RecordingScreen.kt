@@ -61,7 +61,10 @@ internal fun recordingElapsed(state: RecordingState, fallback: Long = 0): Long {
 @Composable
 internal fun ActiveRecordingBar(title: String, state: RecordingState, onOpen: () -> Unit) {
     val elapsed = recordingElapsed(state)
-    Surface(color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
+    Surface(
+        color = MaterialTheme.colorScheme.primaryContainer,
+        modifier = Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onOpen).semantics(mergeDescendants = true) {},
+    ) {
         Row(Modifier.padding(horizontal = 20.dp, vertical = 12.dp).heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
             Spacer(Modifier.width(12.dp))
@@ -122,23 +125,33 @@ internal fun RecordingScreenV2(meeting: MeetingEntity?, viewModel: HomeViewModel
     val microphone = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) requestNotificationsAndStart() else { starting = false; viewModel.reportLocalError("Microphone permission is needed to record a meeting."); onPermissionDenied() }
     }
-    val currentId = when (state) {
-        is RecordingState.Preparing -> (state as RecordingState.Preparing).meetingId
-        is RecordingState.Recording -> (state as RecordingState.Recording).meetingId
-        is RecordingState.Paused -> (state as RecordingState.Paused).meetingId
-        is RecordingState.Finalizing -> (state as RecordingState.Finalizing).meetingId
+    val currentId = when (val session = state) {
+        is RecordingState.Preparing -> session.meetingId
+        is RecordingState.Recording -> session.meetingId
+        is RecordingState.Paused -> session.meetingId
+        is RecordingState.Finalizing -> session.meetingId
         else -> null
     }
     val current = currentId == meeting?.id && meeting != null
+    // A session for a different meeting is running: this screen must not offer a second capture.
+    val otherActive = currentId != null && !current
     val recording = current && state is RecordingState.Recording
     val paused = current && state is RecordingState.Paused
     val finalizing = current && state is RecordingState.Finalizing
     val finished = meeting?.recordingStatus in setOf(RecordingStatus.SAVED, RecordingStatus.INTERRUPTED, RecordingStatus.FAILED)
     val elapsed = recordingElapsed(if (current) state else RecordingState.Idle, meeting?.durationMs ?: 0)
     LaunchedEffect(state) { if (state !is RecordingState.Idle) starting = false }
+    // Never leave the start button disabled forever if Android drops the start request silently.
+    LaunchedEffect(starting) { if (starting) { delay(12_000); starting = false } }
     if (showDiagnostics && BuildConfig.DEBUG && meeting != null) { RecordingDiagnostics(meeting.id, viewModel) { showDiagnostics = false }; return }
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-        Column(Modifier.widthIn(max = 720.dp).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(
+            Modifier.widthIn(max = 720.dp).fillMaxWidth()
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to meetings") }
                 Column(Modifier.weight(1f).padding(start = 8.dp)) {
@@ -153,6 +166,7 @@ internal fun RecordingScreenV2(meeting: MeetingEntity?, viewModel: HomeViewModel
                 meeting?.recordingStatus == RecordingStatus.FAILED -> "Recording failed"
                 meeting?.recordingStatus == RecordingStatus.INTERRUPTED -> "Recording interrupted"
                 finished -> "Recording saved"
+                otherActive -> "Another meeting is recording"
                 current || starting -> "Preparing microphone"
                 else -> "Ready to record"
             }
@@ -199,7 +213,15 @@ internal fun RecordingScreenV2(meeting: MeetingEntity?, viewModel: HomeViewModel
             } else if (finished) {
                 Button(onClick = onBack, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(12.dp)) { Text("Open meeting") }
             } else {
-                Button(onClick = { starting = true; if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) requestNotificationsAndStart() else microphone.launch(Manifest.permission.RECORD_AUDIO) }, enabled = meeting != null && !starting, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Default.Mic, null); Spacer(Modifier.width(8.dp)); Text(if (starting) "Preparing…" else "Start recording") }
+                if (otherActive) {
+                    Text(
+                        "Finish or stop the other recording first. Only one meeting can be captured at a time.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.padding(bottom = 12.dp),
+                    )
+                }
+                Button(onClick = { starting = true; if (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) requestNotificationsAndStart() else microphone.launch(Manifest.permission.RECORD_AUDIO) }, enabled = meeting != null && !starting && !otherActive, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp), shape = RoundedCornerShape(12.dp)) { Icon(Icons.Default.Mic, null); Spacer(Modifier.width(8.dp)); Text(if (starting) "Preparing…" else "Start recording") }
                 Text("Let everyone know before recording.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(top = 12.dp))
             }
             if (bookmarks.isNotEmpty()) Text("${bookmarks.size} saved ${if (bookmarks.size == 1) "bookmark" else "bookmarks"}", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 20.dp))

@@ -22,7 +22,9 @@ object KnowledgeContext {
                 .thenByDescending { it.section in setOf("DECISION", "ACTION", "PROPOSAL") }.thenByDescending { it.updatedAt },
         )
         return ordered.take(64).mapNotNull { entry ->
-            if (chars + entry.text.length > 6000) null else { chars += entry.text.length; PriorEntry(entry.entryKey, requireNotNull(keys[entry.topicId]), NoteSection.valueOf(entry.section), entry.text, entry.userEdited) }
+            // An unknown stored section name must not abort an otherwise valid retry.
+            val section = NoteSection.entries.firstOrNull { it.name == entry.section } ?: return@mapNotNull null
+            if (chars + entry.text.length > 6000) null else { chars += entry.text.length; PriorEntry(entry.entryKey, requireNotNull(keys[entry.topicId]), section, entry.text, entry.userEdited) }
         }
     }
 }

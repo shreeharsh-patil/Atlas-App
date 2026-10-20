@@ -82,6 +82,10 @@ class NotesPipeline @Inject constructor(
         currentCoroutineContext().ensureActive()
         val available = if (job.topicId == null) dao.sources(job.meetingId, job.cursor) else dao.topicSources(job.topicId, job.cursor)
         val chunk = if (job.topicId == null) dao.nextChunk(job.meetingId) else null
+        if (job.topicId != null && available.isEmpty() && chunk == null) {
+            dao.saveJob(job.copy(status = "FAILED", error = "This topic has no saved transcript evidence to refresh.", updatedAt = System.currentTimeMillis()))
+            return PipelineStep.DONE
+        }
         if (chunk != null && available.isEmpty()) {
             val key = providerKey()
             dao.saveJob(job.copy(status = "TRANSCRIBING", error = null, updatedAt = System.currentTimeMillis()))
@@ -113,7 +117,7 @@ class NotesPipeline @Inject constructor(
             val allEntries = dao.entries(job.meetingId)
             val prior = KnowledgeContext.entries(allEntries, selectedTopics, sourceText)
             dao.saveJob(job.copy(status = "EXTRACTING", error = null, updatedAt = System.currentTimeMillis()))
-            val template = MeetingTemplate.valueOf(job.template)
+            val template = meetingTemplateFrom(job.template)
             val extraction = engine.extract(ExtractionInput(template.label, template.focus, window, knownTopics, prior), key, job.textModel, topic?.topicKey)
             currentCoroutineContext().ensureActive()
             // Source and entry checks are repeated against current local state inside the merge transaction.

@@ -15,6 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -32,9 +33,25 @@ import com.meetingatlas.recording.formatRecordingTime
 import java.io.File
 import kotlinx.coroutines.delay
 
+/** A one-shot seek request. The token makes repeated seeks to the same millisecond distinct. */
+data class PlaybackSeek(val positionMs: Long, val token: Long = System.nanoTime())
+
+/**
+ * Segments that the player can actually use. Screens outside the player use it too, so a seek
+ * affordance is never shown when there is nothing to play.
+ */
+internal fun playableSegments(segments: List<AudioSegmentEntity>): List<AudioSegmentEntity> =
+    segments.filter { it.durationMs > 0 && it.validationStatus in setOf("FINALIZED", "VALIDATED", "RECOVERED") }
+
 @Composable
-fun MeetingPlayer(meeting: MeetingEntity, segments: List<AudioSegmentEntity>, viewModel: HomeViewModel, seekRequest: Long?) {
-    val playable = remember(segments) { segments.filter { it.durationMs > 0 && it.validationStatus in setOf("FINALIZED", "VALIDATED", "RECOVERED") } }
+fun MeetingPlayer(
+    meeting: MeetingEntity,
+    segments: List<AudioSegmentEntity>,
+    viewModel: HomeViewModel,
+    seekRequest: PlaybackSeek?,
+    onSeekHandled: () -> Unit = {},
+) {
+    val playable = remember(segments) { playableSegments(segments) }
     if (playable.isEmpty()) return
     val timeline = remember(playable) { PlaybackTimeline(playable.map { it.durationMs }) }
     val context = LocalContext.current
@@ -54,7 +71,9 @@ fun MeetingPlayer(meeting: MeetingEntity, segments: List<AudioSegmentEntity>, vi
     LaunchedEffect(meeting.id) {
         viewModel.playbackPosition(meeting.id)?.let { position = it.positionMs.coerceIn(0, timeline.totalMs); speed = it.speed.coerceIn(0.5f, 2f) }
     }
-    LaunchedEffect(seekRequest) { seekRequest?.let { seek(it) } }
+    LaunchedEffect(seekRequest) {
+        seekRequest?.let { request -> seek(request.positionMs); onSeekHandled() }
+    }
     DisposableEffect(context) {
         val future = MediaController.Builder(context, SessionToken(context, ComponentName(context, MeetingPlaybackService::class.java))).buildAsync()
         var disposed = false
@@ -64,6 +83,8 @@ fun MeetingPlayer(meeting: MeetingEntity, segments: List<AudioSegmentEntity>, vi
     DisposableEffect(controller, meeting.id) {
         val listener = object : Player.Listener {
             override fun onPlayerError(failure: PlaybackException) { error = "This audio could not be played. The original files have been kept."; playing = false }
+            override fun onIsPlayingChanged(isPlaying: Boolean) { playing = isPlaying && controller?.let { owns(it) } == true }
+            override fun onPlaybackParametersChanged(playbackParameters: PlaybackParameters) { speed = playbackParameters.speed }
         }
         controller?.addListener(listener)
         onDispose { controller?.removeListener(listener) }
@@ -86,7 +107,15 @@ fun MeetingPlayer(meeting: MeetingEntity, segments: List<AudioSegmentEntity>, vi
                 Text("${playable.size} ${if (playable.size == 1) "segment" else "segments"}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
             }
             Spacer(Modifier.height(8.dp))
-            Slider(value = position.toFloat().coerceIn(0f, timeline.totalMs.toFloat()), onValueChange = { scrubbing = true; position = it.toLong() }, onValueChangeFinished = { seek(position); scrubbing = false }, valueRange = 0f..timeline.totalMs.toFloat(), modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Recording playback position" })
+            Slider(
+                value = position.toFloat().coerceIn(0f, timeline.totalMs.toFloat()),
+                onValueChange = { scrubbing = true; position = it.toLong() },
+                onValueChangeFinished = { seek(position); scrubbing = false },
+                valueRange = 0f..timeline.totalMs.toFloat(),
+                // Seeking before the player connects would move the thumb without moving playback.
+                enabled = controller != null,
+                modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Recording playback position" },
+            )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(formatRecordingTime(position), style = MaterialTheme.typography.labelMedium)
                 Text(formatRecordingTime(timeline.totalMs), style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary)
@@ -108,13 +137,22 @@ fun MeetingPlayer(meeting: MeetingEntity, segments: List<AudioSegmentEntity>, vi
                 }, modifier = Modifier.size(52.dp)) { Icon(if (playing) Icons.Default.Pause else Icons.Default.PlayArrow, if (playing) "Pause playback" else "Play recording") }
                 IconButton(onClick = { seek(position + 10000) }) { Icon(Icons.Default.Forward10, "Forward 10 seconds") }
                 TextButton(onClick = {
-                    val speeds = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
-                    speed = speeds[(speeds.indexOf(speed) + 1) % speeds.size]
+                    val index = speeds.indexOfFirst { it == speed }.takeIf { it >= 0 } ?: SPEED_INDEX_ONE
+                    speed = speeds[(index + 1) % speeds.size]
                     controller?.takeIf { owns(it) }?.setPlaybackSpeed(speed)
-                }, modifier = Modifier.semantics { contentDescription = "Playback speed, $speed times" }) { Text("${speed}×") }
+                }, modifier = Modifier.semantics {
+                    contentDescription = "Playback speed"
+                    stateDescription = speedLabel(speed)
+                }) { Text(speedLabel(speed)) }
             }
             if (activeRecording != null) Text("Playback is paused during recording.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
             error?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         }
     }
 }
+
+private val speeds = listOf(0.75f, 1f, 1.25f, 1.5f, 2f)
+private const val SPEED_INDEX_ONE = 1
+
+internal fun speedLabel(speed: Float): String =
+    if (speed % 1f == 0f) "${speed.toInt()}×" else "${speed}×"

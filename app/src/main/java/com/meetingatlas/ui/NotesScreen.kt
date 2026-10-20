@@ -23,7 +23,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -32,6 +34,7 @@ import com.meetingatlas.data.*
 import com.meetingatlas.notes.*
 import com.meetingatlas.recording.formatRecordingTime
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -69,8 +72,11 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
     var view by rememberSaveable(meeting.id) { mutableStateOf(SummaryView.STANDARD) }
     var sourceLimit by rememberSaveable(meeting.id) { mutableIntStateOf(100) }
     var transcriptQuery by rememberSaveable(meeting.id) { mutableStateOf("") }
-    val transcript by remember(meeting.id, sourceLimit, transcriptQuery) { viewModel.searchTranscript(meeting.id, transcriptQuery, sourceLimit) }.collectAsStateWithLifecycle(initialValue = emptyList())
-    var seek by remember { mutableStateOf<Long?>(null) }
+    // One extra row tells us whether more matches exist, so "Load more" is never offered at the end.
+    val transcriptRows by remember(meeting.id, sourceLimit, transcriptQuery) { viewModel.searchTranscript(meeting.id, transcriptQuery, sourceLimit + 1) }.collectAsStateWithLifecycle(initialValue = emptyList())
+    val transcript = remember(transcriptRows, sourceLimit) { transcriptRows.take(sourceLimit) }
+    val hasMoreTranscript = transcriptRows.size > sourceLimit
+    var seek by remember { mutableStateOf<PlaybackSeek?>(null) }
     var selectedEntry by remember { mutableStateOf<NoteEntryEntity?>(null) }
     var selectedTopic by remember { mutableStateOf<NoteTopicEntity?>(null) }
     var chapter by remember { mutableStateOf<MeetingChapterEntity?>(null) }
@@ -82,10 +88,15 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
     var confirmAudioDelete by remember { mutableStateOf(false) }
     var confirmRetranscribe by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
-    val template = MeetingTemplate.valueOf(document.state.template)
+    // A stored template name can be unknown after a downgrade or manual edit; never crash the notes screen for it.
+    val template = meetingTemplateFrom(document.state.template)
     val activeJobs = remember(jobs) { jobs.filter { it.status in setOf("QUEUED", "RUNNING", "WAITING", "TRANSCRIBING", "EXTRACTING") } }
-    val latestFailure = jobs.firstOrNull { it.status in setOf("FAILED", "CANCELLED") }
-    val cleanupWarning = if (document.state.audioDeletedAt == null) jobs.firstOrNull { it.status == "SUCCEEDED" && it.error != null }?.error else null
+    // Jobs are ordered newest first: only the latest attempt may advertise a failure or cleanup warning.
+    val latestJob = jobs.firstOrNull()
+    val latestFailure = latestJob?.takeIf { it.status in setOf("FAILED", "CANCELLED") }
+    val cleanupWarning = if (document.state.audioDeletedAt == null) {
+        jobs.firstOrNull { it.status == "SUCCEEDED" }?.takeIf { it.error != null }?.error
+    } else null
     val canRefresh = activeJobs.isEmpty() && document.state.status in setOf("FINALIZED", "PARTIAL_AUDIO")
     val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/markdown")) { uri ->
         if (uri != null) scope.launch {
@@ -105,11 +116,11 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
     val orderedTopics = remember(document.topics) { document.topics.sortedBy { it.position } }
     val orderedChapters = remember(document.chapters) { document.chapters.sortedBy { it.startMs } }
     Scaffold(snackbarHost = { SnackbarHost(snackbar) }, topBar = {
-        TopAppBar(title = { Text(meeting.title, maxLines = 2, style = MaterialTheme.typography.titleMedium) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } }, actions = {
+        TopAppBar(title = { Text(meeting.title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } }, actions = {
             Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Meeting actions") }
                 DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text("Rename meeting") }, onClick = { menu = false; rename = true })
+                    DropdownMenuItem(text = { Text("Rename meeting") }, onClick = { menu = false; title = meeting.title; rename = true })
                     DropdownMenuItem(text = { Text("Export ${view.name.lowercase()} notes") }, onClick = { menu = false; export.launch("${meeting.title.take(60).replace(Regex("[^A-Za-z0-9 ._-]"), "_")}-notes.md") })
                     DropdownMenuItem(text = { Text("OpenRouter settings") }, onClick = { menu = false; onSettings() })
                     if (onPreviousNotes != null) DropdownMenuItem(text = { Text("Previous saved notes") }, onClick = { menu = false; onPreviousNotes() })
@@ -143,14 +154,15 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
             if (document.state.status == "NO_SPEECH" && activeJobs.isEmpty() && meeting.audioPath != null) item(key = "retry-speech") {
                 OutlinedButton(onClick = { confirmRetranscribe = true }) { Text("Try transcription again") }
             }
-            if (meeting.audioPath != null) item(key = "player") { MeetingPlayer(meeting, segments, viewModel, seek) }
+            if (meeting.audioPath != null) item(key = "player") { MeetingPlayer(meeting, segments, viewModel, seek) { seek = null } }
             if (bookmarks.isNotEmpty()) item(key = "bookmarks") {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    bookmarks.forEach { mark -> AssistChip(onClick = { seek = mark.elapsedMs; scope.launch { listState.scrollToItem(0) } }, enabled = meeting.audioPath != null, label = { Text("${formatRecordingTime(mark.elapsedMs)} ${mark.label}") }) }
+                    bookmarks.forEach { mark -> AssistChip(onClick = { seek = PlaybackSeek(mark.elapsedMs); scope.launch { listState.scrollToItem(0) } }, enabled = meeting.audioPath != null, label = { Text("${formatRecordingTime(mark.elapsedMs)} ${mark.label}".trim()) }) }
                 }
             }
             item(key = "tabs") {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Scrollable so the row survives narrow screens and large font scales.
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     listOf("Overview", "Transcript", "Mind map").forEachIndexed { index, label -> FilterChip(selected = tab == index, onClick = { tab = index }, label = { Text(label) }) }
                 }
             }
@@ -182,15 +194,24 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
                 items(transcript, key = { it.id }) { source ->
                     NotePanel {
                         source.startMs?.let { time ->
-                            TextButton(onClick = { seek = time; scope.launch { listState.scrollToItem(0) } }, enabled = meeting.audioPath != null) { Text("${formatRecordingTime(time)}${if (source.precision == "CHUNK") " · approximate interval" else ""}") }
+                            TextButton(onClick = { seek = PlaybackSeek(time); scope.launch { listState.scrollToItem(0) } }, enabled = meeting.audioPath != null) { Text("${formatRecordingTime(time)}${if (source.precision == "CHUNK") " · approximate interval" else ""}") }
                         }
                         Text(source.text, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
-                if (transcript.size == sourceLimit) item(key = "more-sources") { OutlinedButton(onClick = { sourceLimit += 100 }, modifier = Modifier.fillMaxWidth()) { Text("Load more transcript") } }
-                if (transcript.isEmpty()) item(key = "no-sources") { Text("No matching finalized transcript segments are saved yet.") }
+                if (hasMoreTranscript) item(key = "more-sources") { OutlinedButton(onClick = { sourceLimit += 100 }, modifier = Modifier.fillMaxWidth()) { Text("Load more transcript") } }
+                if (transcript.isEmpty()) item(key = "no-sources") {
+                    Text(
+                        if (transcriptQuery.isBlank()) "No finalized transcript segments are saved yet." else "No transcript segments match “$transcriptQuery”.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.secondary,
+                    )
+                }
             } else {
                 item(key = "map-root") { Text(meeting.title, style = MaterialTheme.typography.headlineSmall); Text("Saved topics and evidence from your notes", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary) }
+                if (orderedTopics.isEmpty()) item(key = "map-empty") {
+                    Text("No topics are saved yet. Topics and their evidence appear here once notes finish processing.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary)
+                }
                 items(orderedTopics, key = { it.id }) { topic ->
                     NotePanel {
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -210,15 +231,15 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
     }
     selectedEntry?.let { entry ->
         val current = document.entries.firstOrNull { it.id == entry.id } ?: entry
-        NoteEntrySheet(current, meeting.audioPath != null, viewModel, onDismiss = { selectedEntry = null }, onSeek = { time -> selectedEntry = null; seek = time; scope.launch { listState.scrollToItem(0) } }, onMap = { selectedEntry = null; tab = 2; selectedTopic = document.topics.firstOrNull { it.id == entry.topicId } })
+        NoteEntrySheet(current, meeting.audioPath != null, viewModel, onDismiss = { selectedEntry = null }, onSeek = { time -> selectedEntry = null; seek = PlaybackSeek(time); scope.launch { listState.scrollToItem(0) } }, onMap = { selectedEntry = null; tab = 2; selectedTopic = document.topics.firstOrNull { it.id == entry.topicId } })
     }
     selectedTopic?.let { topic ->
         TopicSheet(topic, document.entries.filter { it.topicId == topic.id }, viewModel, canRefresh, onDismiss = { selectedTopic = null }, onEntry = { selectedTopic = null; selectedEntry = it }, onRefresh = { selectedTopic = null; refreshTopic = topic })
     }
-    chapter?.let { c -> ChapterSheet(c, viewModel, meeting.audioPath != null, onDismiss = { chapter = null }, onSeek = { chapter = null; seek = c.startMs; scope.launch { listState.scrollToItem(0) } }, onEntry = { chapter = null; selectedEntry = it }) }
+    chapter?.let { c -> ChapterSheet(c, viewModel, meeting.audioPath != null, onDismiss = { chapter = null }, onSeek = { chapter = null; seek = PlaybackSeek(c.startMs); scope.launch { listState.scrollToItem(0) } }, onEntry = { chapter = null; selectedEntry = it }) }
     refreshTopic?.let { topic -> AlertDialog(onDismissRequest = { refreshTopic = null }, title = { Text("Refresh ${topic.title}?") }, text = { Text("Only this topic's saved transcript evidence is sent to OpenRouter. Existing manual edits are preserved; proposed replacements appear in revision history.") }, confirmButton = { TextButton(onClick = { refreshTopic = null; viewModel.queueNotes(meeting.id, template, topicId = topic.id) }) { Text("Refresh topic") } }, dismissButton = { TextButton(onClick = { refreshTopic = null }) { Text("Cancel") } }) }
-    if (rename) AlertDialog(onDismissRequest = { rename = false }, title = { Text("Meeting title") }, text = { OutlinedTextField(value = title, onValueChange = { title = it }, label = { Text("Title") }) }, confirmButton = { TextButton(onClick = { viewModel.rename(meeting.id, title); rename = false }) { Text("Save") } }, dismissButton = { TextButton(onClick = { rename = false }) { Text("Cancel") } })
-    if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text("Delete meeting?") }, text = { Text("All its audio, notes, transcript, chapters and history will be removed from this device.") }, confirmButton = { TextButton(onClick = { confirmDelete = false; viewModel.deleteMeeting(meeting.id, onBack) }) { Text("Delete meeting") } }, dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } })
+    if (rename) AlertDialog(onDismissRequest = { rename = false }, title = { Text("Meeting title") }, text = { OutlinedTextField(value = title, onValueChange = { title = it.take(120) }, label = { Text("Title") }, singleLine = true) }, confirmButton = { TextButton(onClick = { viewModel.rename(meeting.id, title); rename = false }, enabled = title.isNotBlank()) { Text("Save") } }, dismissButton = { TextButton(onClick = { rename = false }) { Text("Cancel") } })
+    if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text("Delete meeting?") }, text = { Text("All its audio, notes, transcript, chapters and history will be removed from this device.") }, confirmButton = { TextButton(onClick = { confirmDelete = false; viewModel.deleteMeeting(meeting.id, onBack) }) { Text("Delete meeting", color = MaterialTheme.colorScheme.error) } }, dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } })
     if (confirmAudioDelete) AlertDialog(onDismissRequest = { confirmAudioDelete = false }, title = { Text("Remove source recording?") }, text = { Text("Notes, evidence text and history stay on this device. Playback will no longer be available.") }, confirmButton = { TextButton(onClick = { confirmAudioDelete = false; viewModel.removeAudioAfterAnalysis(meeting.id) }) { Text("Remove audio") } }, dismissButton = { TextButton(onClick = { confirmAudioDelete = false }) { Text("Cancel") } })
     if (confirmRetranscribe) AlertDialog(onDismissRequest = { confirmRetranscribe = false }, title = { Text("Transcribe again?") }, text = { Text("No speech was saved on the previous attempt. This uploads the source audio again using your current OpenRouter transcription model, which may charge for another attempt.") }, confirmButton = { TextButton(onClick = { confirmRetranscribe = false; viewModel.queueNotes(meeting.id, template) }) { Text("Transcribe again") } }, dismissButton = { TextButton(onClick = { confirmRetranscribe = false }) { Text("Cancel") } })
 }
@@ -250,6 +271,8 @@ private fun NoteEntrySheet(entry: NoteEntryEntity, hasAudio: Boolean, viewModel:
     var editingRevision by remember(entry.id) { mutableIntStateOf(entry.revision) }
     var draft by remember(entry.id) { mutableStateOf(entry.text) }
     var showHistory by remember { mutableStateOf(false) }
+    var copied by remember(entry.id) { mutableStateOf(false) }
+    LaunchedEffect(copied) { if (copied) { delay(2_000); copied = false } }
     LaunchedEffect(entry.id, entry.revision) { try { evidence = viewModel.noteEvidence(entry.id) } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled } catch (_: Exception) { error = "Evidence could not be opened. Reopen this note to retry." } }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -259,8 +282,12 @@ private fun NoteEntrySheet(entry: NoteEntryEntity, hasAudio: Boolean, viewModel:
                 Button(onClick = { viewModel.editNote(entry.copy(revision = editingRevision), draft, onDismiss) }, enabled = draft.isNotBlank()) { Text("Save new revision") }
             } else Text(entry.text, style = MaterialTheme.typography.bodyLarge)
             Row(Modifier.horizontalScroll(rememberScrollState())) {
-                TextButton(onClick = { context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Meeting note", entry.text)) }) { Text("Copy") }
-                TextButton(onClick = { if (!editing) { editingRevision = entry.revision; draft = entry.text }; editing = !editing }) { Text("Edit") }
+                TextButton(onClick = {
+                    runCatching { context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("Meeting note", entry.text)) }
+                        .onSuccess { copied = true }
+                        .onFailure { error = "The note could not be copied to the clipboard." }
+                }, modifier = Modifier.semantics { if (copied) liveRegion = LiveRegionMode.Polite }) { Text(if (copied) "Copied" else "Copy") }
+                TextButton(onClick = { if (!editing) { editingRevision = entry.revision; draft = entry.text }; editing = !editing }) { Text(if (editing) "Cancel edit" else "Edit") }
                 TextButton(onClick = { viewModel.highlightNote(entry.id) }) { Text(if (entry.highlighted) "Unhighlight" else "Highlight") }
                 TextButton(onClick = { viewModel.addNoteToMap(entry.id); onMap() }) { Text("Open in mind map") }
                 TextButton(onClick = { showHistory = !showHistory }) { Text("History (${history.size})") }
@@ -293,7 +320,13 @@ private fun TopicSheet(topic: NoteTopicEntity, entries: List<NoteEntryEntity>, v
     var title by remember(topic.id) { mutableStateOf(topic.title) }
     ModalBottomSheet(onDismissRequest = onDismiss) {
         LazyColumn(Modifier.fillMaxWidth().heightIn(max = 650.dp), contentPadding = PaddingValues(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item { OutlinedTextField(title, onValueChange = { title = it.take(160) }, label = { Text("Topic title") }, modifier = Modifier.fillMaxWidth()); Row { TextButton(onClick = { viewModel.renameTopic(topic.id, title); onDismiss() }) { Text("Save title") }; TextButton(onClick = onRefresh, enabled = canRefresh) { Text("Refresh from meeting") } } }
+            item {
+                OutlinedTextField(title, onValueChange = { title = it.take(160) }, label = { Text("Topic title") }, modifier = Modifier.fillMaxWidth(), singleLine = true)
+                Row {
+                    TextButton(onClick = { viewModel.renameTopic(topic.id, title); onDismiss() }, enabled = title.isNotBlank() && title.trim() != topic.title) { Text("Save title") }
+                    TextButton(onClick = onRefresh, enabled = canRefresh) { Text("Refresh from meeting") }
+                }
+            }
             items(entries, key = { it.id }) { entry -> NoteEntryCard(entry, viewModel) { onEntry(entry) } }
         }
     }

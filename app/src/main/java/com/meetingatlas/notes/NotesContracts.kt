@@ -4,6 +4,10 @@ import java.util.UUID
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
+/** Resolves a stored template name without throwing; unknown legacy values fall back to the general template. */
+fun meetingTemplateFrom(stored: String?): MeetingTemplate =
+    MeetingTemplate.entries.firstOrNull { it.name == stored } ?: MeetingTemplate.GENERAL
+
 enum class SummaryView { QUICK, STANDARD, DETAILED, STUDY }
 enum class MeetingTemplate(val label: String, val focus: String) {
     GENERAL("General meeting", "purpose, discussion, decisions and next steps"),

@@ -1,3 +1,4 @@
 <resources>
     <color name="launcher_background">#0A281D</color>
+    <color name="atlas_background">#F5F5F0</color>
 </resources>

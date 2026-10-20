@@ -47,6 +47,12 @@ class HomeViewModel @Inject constructor(
     val processing: StateFlow<ProcessingUiState> = _processing
     private val _settingsMessage = MutableStateFlow<String?>(null)
     val settingsMessage: StateFlow<String?> = _settingsMessage
+    private val _settingsMessageIsError = MutableStateFlow(false)
+    val settingsMessageIsError: StateFlow<Boolean> = _settingsMessageIsError
+    private fun settingsResult(text: String, isError: Boolean) {
+        _settingsMessage.value = text
+        _settingsMessageIsError.value = isError
+    }
     private val _hasOpenRouterKey = MutableStateFlow(processingRepository.settings().hasApiKey)
     val hasOpenRouterKey: StateFlow<Boolean> = _hasOpenRouterKey
     val recordingOptions = recordingPreferences.options.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), com.meetingatlas.recording.RecordingOptions())
@@ -98,35 +104,45 @@ class HomeViewModel @Inject constructor(
     fun observeAnalysis(id: String) = processingRepository.observeAnalysis(id)
     fun openRouterSettings(): OpenRouterSettings = processingRepository.settings()
 
-    fun saveApiKey(key: String) {
+    /** [onSaved] runs only after the encrypted key is durably stored, so a failed save never clears the input. */
+    fun saveApiKey(key: String, onSaved: () -> Unit = {}) {
+        if (key.isBlank()) { settingsResult("Enter an OpenRouter key before saving.", isError = true); return }
         viewModelScope.launch {
             _settingsMessage.value = null
             runCatching { withContext(Dispatchers.IO) { processingRepository.saveApiKey(key) } }
-                .onSuccess { _hasOpenRouterKey.value = true; _settingsMessage.value = "Key saved on this device." }
-                .onFailure { _settingsMessage.value = it.message ?: "Could not save the key." }
+                .onSuccess {
+                    _hasOpenRouterKey.value = true
+                    settingsResult("Key saved on this device.", isError = false)
+                    onSaved()
+                }
+                .onFailure { settingsResult(it.message ?: "Could not save the key.", isError = true) }
         }
     }
 
     fun deleteApiKey() {
         viewModelScope.launch(Dispatchers.IO) {
             runCatching { processingRepository.deleteApiKey() }
-                .onSuccess { _hasOpenRouterKey.value = false; _settingsMessage.value = "OpenRouter key removed." }
-                .onFailure { _settingsMessage.value = it.message ?: "Could not remove the key." }
+                .onSuccess { _hasOpenRouterKey.value = false; settingsResult("OpenRouter key removed.", isError = false) }
+                .onFailure { settingsResult(it.message ?: "Could not remove the key.", isError = true) }
         }
     }
 
     fun saveModels(model: String, transcriptionModel: String) {
         viewModelScope.launch {
             runCatching { withContext(Dispatchers.IO) { processingRepository.saveModels(model, transcriptionModel) } }
-                .onSuccess { _settingsMessage.value = "Model choices saved." }
-                .onFailure { _settingsMessage.value = "Model choices could not be saved. Try again." }
+                .onSuccess { settingsResult("Model choices saved.", isError = false) }
+                .onFailure { settingsResult("Model choices could not be saved. Try again.", isError = true) }
         }
     }
-    fun clearSettingsMessage() { _settingsMessage.value = null }
+    fun clearSettingsMessage() {
+        _settingsMessage.value = null
+        _settingsMessageIsError.value = false
+    }
 
     fun rename(id: String, title: String) {
-        if (title.isBlank()) return
-        localChange { repository.rename(id, title.trim()) }
+        val trimmed = title.trim().take(120)
+        if (trimmed.isBlank()) return
+        localChange { repository.rename(id, trimmed) }
     }
 
     fun generateNotes(id: String) {
@@ -150,11 +166,25 @@ class HomeViewModel @Inject constructor(
 
     fun clearProcessing() { if (!_processing.value.running) _processing.value = ProcessingUiState() }
 
+    private var creatingMeeting = false
     fun createMeeting(onCreated: (MeetingEntity) -> Unit) {
-        localChange { onCreated(repository.create("Untitled meeting")) }
+        // A rapid double tap must not create two draft meetings.
+        if (creatingMeeting) return
+        creatingMeeting = true
+        // A dated default keeps the library readable; every meeting used to be called "Untitled meeting".
+        val stamp = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date())
+        localChange {
+            try { onCreated(repository.create("Meeting · $stamp")) } finally { creatingMeeting = false }
+        }
     }
 
     fun discardDraft(id: String) {
-        localChange { repository.discardDraft(id) }
+        localChange {
+            // Remove an abandoned draft's files too; never touch audio while its session is still capturing.
+            if (com.meetingatlas.recording.AudioWorkCoordinator.recording.value != id) {
+                withContext(Dispatchers.IO) { files.deleteMeetingAudio(id, files.segments(id)) }
+            }
+            repository.discardDraft(id)
+        }
     }
 }

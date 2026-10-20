@@ -12,9 +12,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,8 +30,14 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -34,19 +45,25 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -59,6 +76,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -66,10 +85,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -77,9 +96,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -129,14 +150,39 @@ fun MeetingAtlasApp(viewModel: HomeViewModel = hiltViewModel()) {
     }
     val activeSession = activeId?.let { id -> meetings.firstOrNull { it.id == id } }
     val selectedMeeting = selectedMeetingId?.let { id -> meetings.firstOrNull { it.id == id } }
+    var detailReturn by rememberSaveable { mutableStateOf(Destination.HOME) }
     fun openMeeting(meeting: MeetingEntity) {
         if (meeting.recordingStatus in setOf(RecordingStatus.PREPARING, RecordingStatus.RECORDING, RecordingStatus.PAUSED)) {
             recordingMeetingId = meeting.id; destination = Destination.RECORDING
-        } else { selectedMeetingId = meeting.id; destination = Destination.DETAIL }
+        } else {
+            // Remember where the meeting was opened from so Back returns there instead of always going home.
+            detailReturn = if (destination == Destination.LIBRARY) Destination.LIBRARY else Destination.HOME
+            selectedMeetingId = meeting.id
+            destination = Destination.DETAIL
+        }
+    }
+    fun leaveRecording(): Destination {
+        val meeting = meetings.firstOrNull { it.id == recordingMeetingId }
+        return if (activeId == null && meeting != null && meeting.recordingStatus in setOf(RecordingStatus.SAVED, RecordingStatus.INTERRUPTED, RecordingStatus.FAILED)) {
+            selectedMeetingId = recordingMeetingId
+            detailReturn = Destination.HOME
+            Destination.DETAIL
+        } else {
+            Destination.HOME
+        }
     }
 
-    BackHandler(destination != Destination.HOME) { destination = if (destination == Destination.SETTINGS) settingsReturn else Destination.HOME }
-    Column(Modifier.fillMaxSize()) {
+    BackHandler(destination != Destination.HOME) {
+        destination = when (destination) {
+            Destination.SETTINGS -> settingsReturn
+            Destination.DETAIL -> detailReturn
+            Destination.RECORDING -> leaveRecording()
+            else -> Destination.HOME
+        }
+    }
+    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    // Edge-to-edge windows are not resized for the keyboard, so the IME inset has to be consumed here.
+    Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)).imePadding()) {
     if (activeSession != null && destination != Destination.RECORDING) ActiveRecordingBar(activeSession.title, recordingState) { recordingMeetingId = activeSession.id; destination = Destination.RECORDING }
     Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
     Box(Modifier.widthIn(max = 920.dp).fillMaxSize()) {
@@ -162,11 +208,11 @@ fun MeetingAtlasApp(viewModel: HomeViewModel = hiltViewModel()) {
         Destination.DETAIL -> {
             if (selectedMeeting == null) {
                 if (!meetingsReady) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                LaunchedEffect(meetingsReady, selectedMeetingId) { if (meetingsReady) destination = Destination.LIBRARY }
+                LaunchedEffect(meetingsReady, selectedMeetingId) { if (meetingsReady) destination = detailReturn }
             } else MeetingDetailScreen(
                 meeting = selectedMeeting,
                 viewModel = viewModel,
-                onBack = { destination = Destination.LIBRARY; viewModel.clearProcessing() },
+                onBack = { destination = detailReturn; viewModel.clearProcessing() },
                 onSettings = { settingsReturn = Destination.DETAIL; destination = Destination.SETTINGS },
             )
         }
@@ -174,9 +220,10 @@ fun MeetingAtlasApp(viewModel: HomeViewModel = hiltViewModel()) {
         Destination.RECORDING -> RecordingScreenV2(
             meeting = meetings.firstOrNull { it.id == recordingMeetingId },
             viewModel = viewModel,
-            onBack = { selectedMeetingId = recordingMeetingId; destination = if (activeId == null && meetings.firstOrNull { it.id == recordingMeetingId }?.recordingStatus in setOf(RecordingStatus.SAVED, RecordingStatus.INTERRUPTED, RecordingStatus.FAILED)) Destination.DETAIL else Destination.HOME },
+            onBack = { destination = leaveRecording() },
             onPermissionDenied = { recordingMeetingId?.let { viewModel.discardDraft(it) }; destination = Destination.HOME },
         )
+    }
     }
     }
     }
@@ -189,29 +236,23 @@ private fun AtlasScaffold(selected: Destination, onHome: () -> Unit, onLibrary: 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            Row(
-                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 28.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                BottomItem("Meetings", selected == Destination.HOME, onHome) { Icon(Icons.Default.Mic, null, Modifier.size(19.dp)) }
-                BottomItem("Library", selected == Destination.LIBRARY, onLibrary) { Icon(Icons.AutoMirrored.Filled.LibraryBooks, null, Modifier.size(19.dp)) }
+            // NavigationBar keeps its own navigation-bar inset, ripple and accessibility semantics.
+            NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+                NavigationBarItem(
+                    selected = selected == Destination.HOME,
+                    onClick = onHome,
+                    icon = { Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                    label = { Text("Meetings") },
+                )
+                NavigationBarItem(
+                    selected = selected == Destination.LIBRARY,
+                    onClick = onLibrary,
+                    icon = { Icon(Icons.AutoMirrored.Filled.LibraryBooks, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                    label = { Text("Library") },
+                )
             }
         },
     ) { inset -> Box(Modifier.padding(inset)) { content() } }
-}
-
-@Composable
-private fun BottomItem(label: String, selected: Boolean, onClick: () -> Unit, icon: @Composable () -> Unit) {
-    Column(Modifier.heightIn(min = 48.dp).clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 2.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        CompositionLocalProviderCompat(content = icon, tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary)
-        Spacer(Modifier.height(3.dp))
-        Text(label, style = MaterialTheme.typography.labelSmall, color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
-    }
-}
-
-@Composable
-private fun CompositionLocalProviderCompat(content: @Composable () -> Unit, tint: Color) {
-    androidx.compose.material3.LocalContentColor.let { local -> androidx.compose.runtime.CompositionLocalProvider(local provides tint, content = content) }
 }
 
 @Composable
@@ -264,24 +305,22 @@ private fun HomeScreen(
             }
         }
         item(key = "recent-heading") {
-            Row(Modifier.padding(top = 28.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Recent", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-                TextButton(onClick = onLibrary) { Text("All meetings") }
+            Row(Modifier.padding(top = 28.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Recent", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                    if (recentMeetings.isNotEmpty()) Text("${meetings.size} ${if (meetings.size == 1) "meeting" else "meetings"} saved", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                }
+                TextButton(onClick = onLibrary, enabled = meetings.isNotEmpty()) { Text("All meetings") }
             }
         }
         if (recentMeetings.isEmpty()) {
             item(key = "empty-library") {
-                Surface(
-                    modifier = Modifier.padding(top = 2.dp),
-                    color = MaterialTheme.colorScheme.surface,
-                    shape = RoundedCornerShape(18.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-                ) {
-                    Column(Modifier.fillMaxWidth().padding(18.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Text("No recordings yet", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
-                        Text("Start a recording here. Saved audio stays on this device until you choose to create notes.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary)
-                    }
-                }
+                EmptyStateCard(
+                    icon = Icons.Default.Mic,
+                    title = "No recordings yet",
+                    body = "Start a recording here. Saved audio stays on this device until you choose to create notes.",
+                    modifier = Modifier.padding(top = 10.dp),
+                )
             }
         } else {
             items(recentMeetings, key = { "recent-${it.id}" }) { meeting ->
@@ -293,23 +332,97 @@ private fun HomeScreen(
 }
 
 @Composable
+private fun EmptyStateCard(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, body: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(46.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape), Alignment.Center) {
+                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
+            }
+            Spacer(Modifier.width(14.dp))
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
+                Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary)
+            }
+        }
+    }
+}
+
+@Composable
 private fun LibraryScreen(meetings: List<MeetingEntity>, onBack: () -> Unit, onMeeting: (MeetingEntity) -> Unit) {
+    var query by rememberSaveable { mutableStateOf("") }
+    val focusManager = LocalFocusManager.current
+    val filtered = remember(meetings, query) {
+        val needle = query.trim()
+        if (needle.isEmpty()) meetings else meetings.filter { it.title.contains(needle, ignoreCase = true) }
+    }
+    val monthFormat = remember { java.text.SimpleDateFormat("MMMM yyyy", java.util.Locale.getDefault()) }
+    val grouped = remember(filtered, monthFormat) {
+        filtered.groupBy { monthFormat.format(Date(it.createdAt)) }
+    }
     Column(Modifier.fillMaxSize().padding(horizontal = 22.dp)) {
         Spacer(Modifier.height(18.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             Column(Modifier.padding(start = 4.dp)) {
                 Text("Your library", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
-                Text("${meetings.size} ${if (meetings.size == 1) "meeting" else "meetings"}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                Text(
+                    if (query.isBlank()) "${meetings.size} ${if (meetings.size == 1) "meeting" else "meetings"}"
+                    else "${filtered.size} of ${meetings.size} shown",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                )
             }
         }
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
+        if (meetings.isNotEmpty()) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it.take(80) },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("Search meeting titles") },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = {
+                    if (query.isNotEmpty()) IconButton(onClick = { query = "" }) { Icon(Icons.Default.Clear, contentDescription = "Clear search") }
+                },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
+                shape = RoundedCornerShape(14.dp),
+            )
+            Spacer(Modifier.height(10.dp))
+        }
         if (meetings.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("No saved meetings yet.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.secondary)
+            Box(Modifier.fillMaxSize().padding(bottom = 40.dp), contentAlignment = Alignment.Center) {
+                EmptyStateCard(
+                    icon = Icons.AutoMirrored.Filled.LibraryBooks,
+                    title = "Your library is empty",
+                    body = "Saved recordings appear here, newest first. Start one from the Meetings tab.",
+                )
+            }
+        } else if (filtered.isEmpty()) {
+            Box(Modifier.fillMaxSize().padding(bottom = 40.dp), contentAlignment = Alignment.Center) {
+                Text("No meetings match “${query.trim()}”.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.secondary)
             }
         } else LazyColumn(contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            items(meetings, key = { it.id }) { MeetingRow(it, onClick = { onMeeting(it) }) }
+            grouped.forEach { (month, monthMeetings) ->
+                item(key = "month-$month") {
+                    Text(
+                        month,
+                        modifier = Modifier.padding(top = 10.dp, bottom = 2.dp, start = 2.dp),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.secondary,
+                        letterSpacing = 0.8.sp,
+                    )
+                }
+                items(monthMeetings, key = { it.id }) { meeting ->
+                    MeetingRow(meeting, onClick = { onMeeting(meeting) })
+                }
+            }
         }
     }
 }
@@ -320,8 +433,14 @@ private fun MeetingRow(meeting: MeetingEntity, onClick: () -> Unit, modifier: Mo
         DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(meeting.createdAt))
     }
     val isActive = meeting.recordingStatus in setOf(RecordingStatus.PREPARING, RecordingStatus.RECORDING, RecordingStatus.PAUSED)
+    // A "Saved" chip on every row is noise; only surface a status that needs attention.
+    val statusChip = meeting.recordingStatus.takeIf { it != RecordingStatus.SAVED }
+    val needsAttention = meeting.recordingStatus == RecordingStatus.FAILED || meeting.recordingStatus == RecordingStatus.INTERRUPTED
+    // A draft that was never started is not actually "preparing"; label it honestly.
+    val statusText = if (meeting.recordingStatus == RecordingStatus.PREPARING && meeting.startedAt == null) "Draft" else statusLabel(meeting.recordingStatus)
     Surface(
-        modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
+        // Merge the row's texts so a screen reader announces it as one button.
+        modifier = modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).semantics(mergeDescendants = true) {},
         color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
@@ -334,18 +453,28 @@ private fun MeetingRow(meeting: MeetingEntity, onClick: () -> Unit, modifier: Mo
             Column(Modifier.weight(1f)) {
                 Text(meeting.title, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(3.dp))
-                Text("$createdLabel  ·  ${durationLabel(meeting.durationMs)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                Text(meetingMetaLabel(createdLabel, meeting.durationMs), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
             }
-            Surface(
-                color = if (isActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
-                shape = CircleShape,
-            ) {
-                Text(
-                    statusLabel(meeting.recordingStatus),
-                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.secondary,
-                )
+            statusChip?.let {
+                Surface(
+                    color = when {
+                        isActive -> MaterialTheme.colorScheme.primaryContainer
+                        needsAttention -> MaterialTheme.colorScheme.errorContainer
+                        else -> MaterialTheme.colorScheme.surfaceVariant
+                    },
+                    shape = CircleShape,
+                ) {
+                    Text(
+                        statusText,
+                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = when {
+                            isActive -> MaterialTheme.colorScheme.onPrimaryContainer
+                            needsAttention -> MaterialTheme.colorScheme.onErrorContainer
+                            else -> MaterialTheme.colorScheme.secondary
+                        },
+                    )
+                }
             }
         }
     }
@@ -369,7 +498,7 @@ private fun MeetingDetailScreen(
     val segments by remember(meeting.id) { viewModel.observeSegments(meeting.id) }.collectAsStateWithLifecycle(initialValue = emptyList())
     val bookmarks by remember(meeting.id) { viewModel.observeBookmarks(meeting.id) }.collectAsStateWithLifecycle(initialValue = emptyList())
     val options by viewModel.recordingOptions.collectAsStateWithLifecycle()
-    var seekRequest by remember(meeting.id) { mutableStateOf<Long?>(null) }
+    var seekRequest by remember(meeting.id) { mutableStateOf<PlaybackSeek?>(null) }
     var editingBookmark by remember { mutableStateOf<BookmarkEntity?>(null) }
     var bookmarkLabel by rememberSaveable { mutableStateOf("") }
     var diagnostics by rememberSaveable { mutableStateOf(false) }
@@ -384,29 +513,42 @@ private fun MeetingDetailScreen(
     var showRenameDialog by rememberSaveable(meeting.id) { mutableStateOf(false) }
     var titleDraft by rememberSaveable(meeting.id) { mutableStateOf(meeting.title) }
     val thisProcessing = processing.meetingId == meeting.id
+    val hasKey by viewModel.hasOpenRouterKey.collectAsStateWithLifecycle()
+    // Bookmarks and transcript rows only offer a seek action when the player can actually play something.
+    val playerReady = remember(segments) { playableSegments(segments).isNotEmpty() }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 22.dp)) {
+    Column(
+        Modifier.fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 22.dp),
+    ) {
         Spacer(Modifier.height(14.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             Column(Modifier.weight(1f).padding(start = 4.dp)) {
                 Text("MEETING", style = MaterialTheme.typography.labelSmall, letterSpacing = 1.2.sp, color = MaterialTheme.colorScheme.secondary)
-                Text(meeting.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                Text(meeting.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
             IconButton(onClick = { titleDraft = meeting.title; showRenameDialog = true }) { Icon(Icons.Default.Edit, contentDescription = "Rename meeting", tint = MaterialTheme.colorScheme.secondary) }
         }
-        Text("${DateFormat.getDateInstance(DateFormat.FULL).format(Date(meeting.createdAt))}  ·  ${durationLabel(meeting.durationMs)}", modifier = Modifier.padding(start = 16.dp, top = 1.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+        Text(
+            remember(meeting.createdAt, meeting.durationMs) {
+                "${DateFormat.getDateInstance(DateFormat.FULL).format(Date(meeting.createdAt))}  ·  ${formatMeetingDuration(meeting.durationMs)}"
+            },
+            modifier = Modifier.padding(start = 16.dp, top = 1.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary,
+        )
         Spacer(Modifier.height(18.dp))
         if (previousNotes) TextButton(onClick = { previousNotes = false }) { Text("Return to current source-linked notes") }
 
         meeting.lastError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall); Spacer(Modifier.height(12.dp)) }
-        MeetingPlayer(meeting, segments, viewModel, seekRequest)
-        if (segments.isNotEmpty()) Spacer(Modifier.height(12.dp))
+        MeetingPlayer(meeting, segments, viewModel, seekRequest) { seekRequest = null }
+        if (playerReady) Spacer(Modifier.height(12.dp))
         if (bookmarks.isNotEmpty()) {
             ContentCard("Bookmarks") {
                 bookmarks.forEach { bookmark ->
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        if (segments.any { it.durationMs > 0 }) TextButton(onClick = { seekRequest = bookmark.elapsedMs }) { Text(formatRecordingTime(bookmark.elapsedMs)) }
+                        if (playerReady) TextButton(onClick = { seekRequest = PlaybackSeek(bookmark.elapsedMs) }) { Text(formatRecordingTime(bookmark.elapsedMs)) }
                         else Text(formatRecordingTime(bookmark.elapsedMs), style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(end = 12.dp))
                         Text(bookmark.label.ifBlank { "Bookmarked moment" }, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                         IconButton(onClick = { editingBookmark = bookmark; bookmarkLabel = bookmark.label }) { Icon(Icons.Default.Edit, "Edit bookmark label") }
@@ -419,12 +561,12 @@ private fun MeetingDetailScreen(
         if (analysis == null) {
             ProcessingSetupCard(
                 hasAudio = meeting.audioPath != null && meeting.recordingStatus in setOf(RecordingStatus.SAVED, RecordingStatus.INTERRUPTED),
-                hasKey = viewModel.openRouterSettings().hasApiKey,
+                hasKey = hasKey,
                 running = thisProcessing && processing.running,
                 progress = if (thisProcessing) processing.message else null,
                 error = if (thisProcessing) processing.error else null,
                 onGenerate = {
-                    if (!viewModel.openRouterSettings().hasApiKey) onSettings() else showUploadDialog = true
+                    if (!hasKey) onSettings() else showUploadDialog = true
                 },
             )
         } else {
@@ -438,11 +580,20 @@ private fun MeetingDetailScreen(
                 Text(processing.error!!, modifier = Modifier.padding(horizontal = 3.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
             Spacer(Modifier.height(16.dp))
-            Row(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)).padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(
+                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)).padding(4.dp).selectableGroup(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
                 DetailTab.entries.forEach { tab ->
                     val label = when (tab) { DetailTab.SUMMARY -> "Summary"; DetailTab.MAP -> "Mind map"; DetailTab.TRANSCRIPT -> "Transcript" }
                     val selected = selectedTab == tab
-                    Box(Modifier.weight(1f).background(if (selected) MaterialTheme.colorScheme.surface else Color.Transparent, RoundedCornerShape(9.dp)).clickable { selectedTab = tab }.padding(vertical = 10.dp), contentAlignment = Alignment.Center) {
+                    Box(
+                        Modifier.weight(1f)
+                            .background(if (selected) MaterialTheme.colorScheme.surface else Color.Transparent, RoundedCornerShape(9.dp))
+                            .selectable(selected = selected, role = Role.Tab, onClick = { selectedTab = tab })
+                            .heightIn(min = 40.dp).padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
                         Text(label, color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.labelMedium, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
                     }
                 }
@@ -451,7 +602,9 @@ private fun MeetingDetailScreen(
             when (selectedTab) {
                 DetailTab.SUMMARY -> SummaryContent(analysis!!)
                 DetailTab.MAP -> MindMapContent(analysis!!.mindMapJson)
-                DetailTab.TRANSCRIPT -> if (analysis!!.transcript.isNotBlank()) TranscriptContent(analysis!!.transcript) else TextButton(onClick = { previousNotes = false }) { Text("Open transcript in current notes") }
+                DetailTab.TRANSCRIPT -> if (analysis!!.transcript.isNotBlank()) TranscriptContent(analysis!!.transcript) else ContentCard("Transcript") {
+                    MutedText("No transcript text was saved for this meeting. Create notes from the source audio to add one.")
+                }
             }
             if (analysis!!.audioDeletedAt == null && meeting.audioPath != null) {
                 Spacer(Modifier.height(10.dp))
@@ -485,8 +638,8 @@ private fun MeetingDetailScreen(
     if (showRenameDialog) AlertDialog(
         onDismissRequest = { showRenameDialog = false },
         title = { Text("Name this meeting") },
-        text = { OutlinedTextField(value = titleDraft, onValueChange = { titleDraft = it }, singleLine = true, label = { Text("Meeting title") }) },
-        confirmButton = { TextButton(onClick = { viewModel.rename(meeting.id, titleDraft); showRenameDialog = false }) { Text("Save") } },
+        text = { OutlinedTextField(value = titleDraft, onValueChange = { titleDraft = it.take(120) }, singleLine = true, label = { Text("Meeting title") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text)) },
+        confirmButton = { TextButton(onClick = { viewModel.rename(meeting.id, titleDraft); showRenameDialog = false }, enabled = titleDraft.isNotBlank()) { Text("Save") } },
         dismissButton = { TextButton(onClick = { showRenameDialog = false }) { Text("Cancel") } },
     )
 }
@@ -542,7 +695,11 @@ private fun AudioLifecycleNote(analysis: MeetingAnalysisEntity, audioStillPresen
 @Composable
 private fun SummaryContent(analysis: MeetingAnalysisEntity) {
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        ContentCard("Summary") { Text(analysis.summary, style = MaterialTheme.typography.bodyLarge, lineHeight = 25.sp) }
+        ContentCard("Summary") {
+            val summary = analysis.summary.trim()
+            if (summary.isEmpty()) MutedText("No summary text was saved for this meeting.")
+            else SelectionContainer { Text(summary, style = MaterialTheme.typography.bodyLarge, lineHeight = 25.sp) }
+        }
         val keyPoints = readStringArray(analysis.keyPointsJson)
         if (keyPoints.isNotEmpty()) ContentCard("Key points") { keyPoints.forEach { BulletText(it) } }
         val decisions = readStringArray(analysis.decisionsJson)
@@ -567,24 +724,36 @@ private fun SummaryContent(analysis: MeetingAnalysisEntity) {
 private fun MindMapContent(raw: String) {
     val map = remember(raw) { runCatching { JSONObject(raw) }.getOrNull() }
     val branches = map?.optJSONArray("branches") ?: JSONArray()
-    val expanded = remember(raw) { mutableStateListOf<Int>().apply { for (index in 0 until minOf(branches.length(), 4)) add(index) } }
+    var expanded by remember(raw) { mutableStateOf((0 until minOf(branches.length(), 4)).toSet()) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(16.dp)) {
             Text(map?.optString("label").orEmpty().ifBlank { "Meeting" }, modifier = Modifier.fillMaxWidth().padding(17.dp), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
         }
         if (branches.length() == 0) MutedText("No map branches were returned.")
+        if (branches.length() > 1) {
+            // The label must describe what the tap does, not just whether some branch is open.
+            TextButton(onClick = { expanded = if (expanded.size >= branches.length()) emptySet() else (0 until branches.length()).toSet() }) {
+                Text(if (expanded.size >= branches.length()) "Collapse all branches" else "Expand all branches")
+            }
+        }
         for (index in 0 until branches.length()) {
             val branch = branches.optJSONObject(index) ?: continue
             val isExpanded = index in expanded
             Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(15.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) {
                 Column(Modifier.fillMaxWidth().clickable {
-                    if (isExpanded) expanded.remove(index) else expanded.add(index)
-                }.padding(horizontal = 15.dp, vertical = 13.dp)) {
+                    expanded = if (isExpanded) expanded - index else expanded + index
+                }.semantics { stateDescription = if (isExpanded) "Expanded" else "Collapsed" }
+                    .padding(horizontal = 15.dp, vertical = 13.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(8.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
                         Spacer(Modifier.width(11.dp))
                         Text(branch.optString("label"), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-                        Icon(Icons.Default.ExpandMore, contentDescription = if (isExpanded) "Collapse branch" else "Expand branch", tint = MaterialTheme.colorScheme.secondary)
+                        Icon(
+                            Icons.Default.ExpandMore,
+                            contentDescription = if (isExpanded) "Collapse branch" else "Expand branch",
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.rotate(if (isExpanded) 180f else 0f),
+                        )
                     }
                     if (isExpanded) {
                         val topics = branch.optJSONArray("topics") ?: JSONArray()
@@ -603,13 +772,17 @@ private fun MindMapContent(raw: String) {
                 }
             }
         }
-        Text("Select a branch to expand it.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+        if (branches.length() > 0 && expanded.size < branches.length()) {
+            Text("Select a branch to expand it.", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+        }
     }
 }
 
 @Composable
 private fun TranscriptContent(transcript: String) {
-    ContentCard("Transcript") { Text(transcript, style = MaterialTheme.typography.bodyMedium, lineHeight = 23.sp) }
+    ContentCard("Transcript") {
+        SelectionContainer { Text(transcript, style = MaterialTheme.typography.bodyMedium, lineHeight = 23.sp) }
+    }
 }
 
 @Composable
@@ -642,13 +815,23 @@ private fun SettingsScreen(viewModel: HomeViewModel, onBack: () -> Unit) {
     val bluetoothPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) viewModel.setBluetooth(true) else viewModel.reportLocalError("Nearby devices permission is needed to select a Bluetooth microphone.")
     }
-    val savedSettings = viewModel.openRouterSettings()
-    var apiKey by rememberSaveable { mutableStateOf("") }
+    val savedSettings = remember { viewModel.openRouterSettings() }
+    // The key field must never enter saved instance state, where the plaintext token would be written to the activity bundle.
+    var apiKey by remember { mutableStateOf("") }
+    var showKey by remember { mutableStateOf(false) }
     var model by rememberSaveable { mutableStateOf(savedSettings.model) }
     var transcriptionModel by rememberSaveable { mutableStateOf(savedSettings.transcriptionModel) }
     val hasSavedKey by viewModel.hasOpenRouterKey.collectAsStateWithLifecycle()
     val message by viewModel.settingsMessage.collectAsStateWithLifecycle()
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 22.dp)) {
+    val messageIsError by viewModel.settingsMessageIsError.collectAsStateWithLifecycle()
+    DisposableEffect(Unit) { onDispose { viewModel.clearSettingsMessage() } }
+    val modelsValid = model.isNotBlank() && transcriptionModel.isNotBlank()
+    Column(
+        Modifier.fillMaxSize()
+            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 22.dp),
+    ) {
         Spacer(Modifier.height(18.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
@@ -685,32 +868,62 @@ private fun SettingsScreen(viewModel: HomeViewModel, onBack: () -> Unit) {
             Text(if (hasSavedKey) "A key is stored securely on this device." else "Add your own OpenRouter key. It is encrypted with Android Keystore and never included in the app build.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary)
             Spacer(Modifier.height(14.dp))
             OutlinedTextField(
-                value = apiKey, onValueChange = { apiKey = it }, modifier = Modifier.fillMaxWidth(),
+                value = apiKey, onValueChange = { apiKey = it.trim() }, modifier = Modifier.fillMaxWidth(),
                 label = { Text(if (hasSavedKey) "Replace API key" else "OpenRouter API key") },
                 placeholder = { Text("sk-or-…") }, singleLine = true,
-                visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                visualTransformation = if (showKey) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                trailingIcon = {
+                    IconButton(onClick = { showKey = !showKey }) {
+                        Icon(if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility, contentDescription = if (showKey) "Hide API key" else "Show API key")
+                    }
+                },
             )
             Spacer(Modifier.height(9.dp))
-            Button(onClick = { viewModel.saveApiKey(apiKey); apiKey = "" }, enabled = apiKey.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Save key on this device") }
+            Button(
+                onClick = { viewModel.saveApiKey(apiKey) { apiKey = ""; showKey = false } },
+                enabled = apiKey.isNotBlank(),
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("Save key on this device") }
             if (hasSavedKey) TextButton(onClick = { viewModel.deleteApiKey() }, modifier = Modifier.align(Alignment.End)) { Text("Remove saved key", color = MaterialTheme.colorScheme.error) }
         }
         Spacer(Modifier.height(12.dp))
         ContentCard("Models") {
             Text("Summary and mind map default to OpenRouter's free-model router. Transcription defaults to Whisper, which may be billed by audio duration. Check current model pricing before processing.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
             Spacer(Modifier.height(10.dp))
-            OutlinedTextField(value = model, onValueChange = { model = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Summary & mind map · free default") }, singleLine = true)
+            OutlinedTextField(value = model, onValueChange = { model = it.trim() }, modifier = Modifier.fillMaxWidth(), label = { Text("Summary & mind map · free default") }, singleLine = true)
             Spacer(Modifier.height(8.dp))
-            OutlinedTextField(value = transcriptionModel, onValueChange = { transcriptionModel = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Transcription model · may cost") }, singleLine = true)
+            OutlinedTextField(value = transcriptionModel, onValueChange = { transcriptionModel = it.trim() }, modifier = Modifier.fillMaxWidth(), label = { Text("Transcription model · may cost") }, singleLine = true)
+            if (!modelsValid) {
+                Spacer(Modifier.height(6.dp))
+                Text("Both model names are required before these choices can be saved.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
             Spacer(Modifier.height(8.dp))
-            OutlinedButton(onClick = { viewModel.saveModels(model, transcriptionModel) }, modifier = Modifier.fillMaxWidth()) { Text("Save model choices") }
+            OutlinedButton(onClick = { viewModel.saveModels(model, transcriptionModel) }, enabled = modelsValid, modifier = Modifier.fillMaxWidth()) { Text("Save model choices") }
         }
-        if (message != null) {
+        message?.let { text ->
             Spacer(Modifier.height(10.dp))
-            Text(message!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            Surface(
+                color = if (messageIsError) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
+                shape = RoundedCornerShape(12.dp),
+            ) {
+                Text(
+                    text,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 11.dp).semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (messageIsError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer,
+                )
+            }
         }
         Spacer(Modifier.height(14.dp))
         Text("Audio and transcript are sent to OpenRouter only when you create notes. The free model default applies to summary and mind map; transcription may cost money. Your audio retention choice takes effect after notes are saved.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(horizontal = 2.dp))
         Spacer(Modifier.height(22.dp))
+        Text(
+            "Meeting Atlas ${BuildConfig.VERSION_NAME}" + if (BuildConfig.DEBUG) " · debug build" else "",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.padding(start = 2.dp, bottom = 6.dp),
+        )
     }
 }
 
@@ -723,12 +936,6 @@ private fun readActionItems(raw: String): List<JSONObject> = runCatching {
     val array = JSONArray(raw)
     (0 until array.length()).mapNotNull { array.optJSONObject(it) }
 }.getOrDefault(emptyList())
-
-private fun durationLabel(milliseconds: Long): String {
-    if (milliseconds <= 0) return "Duration unavailable"
-    val seconds = milliseconds / 1_000
-    return if (seconds >= 3_600) "%dh %02dm".format(seconds / 3_600, seconds / 60 % 60) else "%dm".format(seconds / 60)
-}
 
 private fun statusLabel(status: RecordingStatus): String = when (status) {
     RecordingStatus.PREPARING -> "Preparing"

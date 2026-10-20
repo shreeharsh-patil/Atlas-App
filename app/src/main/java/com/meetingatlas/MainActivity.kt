@@ -1,6 +1,7 @@
 package com.meetingatlas
 
 import android.os.Bundle
+import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.lifecycleScope
 import com.meetingatlas.data.MeetingDatabase
 import com.meetingatlas.recording.RecordingRecoveryManager
@@ -18,6 +19,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Android 15+ draws every app edge-to-edge; opt in explicitly so system-bar icon contrast follows the theme.
+        enableEdgeToEdge()
         lifecycleScope.launch {
             try { RecordingRecoveryManager(applicationContext, database).recoverInterruptedSessions() }
             catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }

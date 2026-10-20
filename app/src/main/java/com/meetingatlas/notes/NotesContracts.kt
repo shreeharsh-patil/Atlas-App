@@ -49,6 +49,40 @@ class InvalidNotes(message: String) : IllegalArgumentException(message)
 object NotesValidator {
     private val keyPattern = Regex("[a-z0-9][a-z0-9._-]{0,95}")
     private val excludedReasons = setOf("social_chatter", "repetition", "unclear", "context_only")
+
+    /**
+     * Normalises a quote before it is compared with the stored transcript.
+     *
+     * Models routinely convert straight quotes into typographic ones, collapse runs of
+     * whitespace or drop a trailing full stop. Comparing byte for byte would reject the
+     * whole window and the meeting could never get notes.
+     */
+    internal fun normaliseQuote(value: String): String {
+        val flattened = value
+            .replace('\u201C', '"').replace('\u201D', '"')
+            .replace('\u2018', '\'').replace('\u2019', '\'')
+            .replace("\u2026", "...")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        // A model often wraps a quote in quotation marks. Those marks are not part of the
+        // transcript text, so a matching outer pair is removed before comparing.
+        return if (flattened.length >= 2 &&
+            ((flattened.first() == '"' && flattened.last() == '"') ||
+                (flattened.first() == '\'' && flattened.last() == '\''))
+        ) {
+            flattened.substring(1, flattened.length - 1).trim()
+        } else {
+            flattened
+        }
+    }
+
+    /** A stored key that satisfies [keyPattern], derived from whatever the model returned. */
+    fun normaliseKey(raw: String): String = raw.trim().lowercase(java.util.Locale.ROOT)
+        .replace(Regex("[^a-z0-9._-]+"), "_")
+        .trim('_')
+        .take(96)
+        .ifBlank { "note" }
+
     fun validate(patch: WindowExtraction, sources: List<EvidenceSource>, knownTopics: Set<String> = emptySet(), knownEntries: Set<String> = emptySet(), topicScope: String? = null) {
         fun verify(condition: Boolean, message: String) { if (!condition) throw InvalidNotes(message) }
         val sourceMap = sources.associateBy { it.id }
@@ -57,18 +91,28 @@ object NotesValidator {
         verify(patch.topics.size <= 32 && patch.entries.size <= 64 && patch.chapters.size <= 12, "The model returned too much output for one window")
         verify(patch.topics.map { it.key }.distinct().size == patch.topics.size && patch.entries.map { it.key }.distinct().size == patch.entries.size, "Duplicate topic or entry keys")
         val topics = knownTopics + patch.topics.map { it.key }
-        patch.topics.forEach { verify(keyPattern.matches(it.key) && it.title.isNotBlank() && it.title.length <= 160, "Invalid topic"); verify(topicScope == null || it.key == topicScope, "A topic refresh changed an unrelated topic") }
+        patch.topics.forEach {
+            verify(keyPattern.matches(it.key) && it.title.isNotBlank() && it.title.length <= 160, "Invalid topic")
+            // A refresh may re-declare a topic that already exists, but it must not
+            // introduce a new subject outside its scope.
+            verify(topicScope == null || it.key == topicScope || it.key in knownTopics, "A topic refresh changed an unrelated topic")
+        }
         patch.entries.forEach { entry ->
             verify(keyPattern.matches(entry.key) && entry.topicKey in topics && (topicScope == null || entry.topicKey == topicScope), "Invalid entry identity or topic")
             verify(entry.text.isNotBlank() && entry.text.length <= 1800 && entry.importance in 1..3, "Invalid note text or importance")
             verify(entry.sources.isNotEmpty() && entry.sources.size <= 12 && entry.sources.map { it.sourceId }.distinct().size == entry.sources.size, "A factual item has missing or duplicate sources")
             entry.sources.forEach { ref ->
-                val source = sourceMap[ref.sourceId]
-                verify(source != null && ref.quote.isNotBlank() && ref.quote.trim().length >= minOf(12, source.text.trim().length) && ref.quote.length <= 2000 && source.text.contains(ref.quote), "A citation is missing or its quote is not in the transcript")
+                val source = sourceMap[ref.sourceId] ?: throw InvalidNotes("A citation is missing or its quote is not in the transcript")
+                val quoted = normaliseQuote(ref.quote)
+                val stored = normaliseQuote(source.text)
+                verify(
+                    quoted.isNotBlank() && quoted.length >= minOf(12, stored.length) && ref.quote.length <= 2000 && stored.contains(quoted),
+                    "A citation is missing or its quote is not in the transcript",
+                )
             }
-            val quotes = entry.sources.joinToString("\n") { it.quote }
-            verify(entry.owner == null || (entry.section == NoteSection.ACTION && entry.owner.isNotBlank() && quotes.contains(entry.owner)), "An action owner lacks quoted evidence")
-            verify(entry.deadline == null || (entry.section == NoteSection.ACTION && entry.deadline.isNotBlank() && quotes.contains(entry.deadline)), "An action deadline lacks quoted evidence")
+            val quotes = entry.sources.joinToString("\n") { normaliseQuote(it.quote) }
+            verify(entry.owner == null || (entry.section == NoteSection.ACTION && entry.owner.isNotBlank() && quotes.contains(normaliseQuote(entry.owner))), "An action owner lacks quoted evidence")
+            verify(entry.deadline == null || (entry.section == NoteSection.ACTION && entry.deadline.isNotBlank() && quotes.contains(normaliseQuote(entry.deadline))), "An action deadline lacks quoted evidence")
             verify(entry.supersedesKey == null || (entry.supersedesKey in knownEntries && entry.supersedesKey != entry.key), "A revised decision refers to an unknown or identical entry")
         }
         verify(patch.ignored.map { it.sourceId }.distinct().size == patch.ignored.size, "Duplicate excluded source")

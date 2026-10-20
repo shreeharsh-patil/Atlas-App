@@ -22,6 +22,24 @@ class TranscriptAndViewsTest {
     @Test(expected = IllegalArgumentException::class) fun outOfRangeProviderTimestampsAreRejected() {
         TranscriptNormalizer.normalize("""{"segments":[{"text":"Wrong interval.","start":0.0,"end":200.0}]}""", "m", 0, 0, 120000)
     }
+    @Test fun aSmallProviderTimestampOverrunIsClampedInsteadOfFailingTheWholeChunk() {
+        // The AAC encoder delay makes the provider's last segment end slightly after the
+        // container duration. That must not abort the meeting.
+        val result = TranscriptNormalizer.normalize(
+            """{"segments":[{"text":"Nearly at the end.","start":0.0,"end":120.9}]}""", "m", 0, 0, 120000,
+        ).single()
+        assertEquals(0L, result.startMs)
+        assertEquals(120000L, result.endMs)
+    }
+    @Test fun nullSegmentsAndNullTextAreTolerated() {
+        val result = TranscriptNormalizer.normalize("""{"text":null,"segments":null}""", "m", 0, 0, 10000)
+        assertTrue(result.isEmpty())
+    }
+    @Test fun aPlainTranscriptWithoutSegmentsIsStillUsable() {
+        val result = TranscriptNormalizer.normalize("""{"text":"A plain transcript."}""", "m", 0, 0, 10000).single()
+        assertEquals("A plain transcript.", result.text)
+        assertEquals("CHUNK", result.precision)
+    }
     @Test fun noSpeechDoesNotProduceFakeContent() { assertTrue(TranscriptNormalizer.normalize("""{"text":""}""", "m", 0, 0, 10000).isEmpty()) }
     private fun item(id: String, section: String, importance: Int = 3, superseded: String? = null) = NoteEntryEntity(id, "m", id, "topic-${id.toInt() % 3}", section, "Recorded detail $id", importance, null, null, "SOURCE_LINKED", false, false, false, true, 1, superseded, id.toLong(), id.toInt())
     @Test fun allFourViewsUseTheSameSavedKnowledgeAndDetailedKeepsTheMiddle() {

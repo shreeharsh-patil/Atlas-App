@@ -45,6 +45,8 @@ class MeetingRecordingService : Service() {
     private var storageJob: Job? = null
     private var recordingCallback: AudioManager.AudioRecordingCallback? = null
     private var routingListener: AudioRouting.OnRoutingChangedListener? = null
+    /** Wall-clock instant of the capture start, used for the notification chronometer. */
+    private var wallStartMs = 0L
 
     override fun onCreate() {
         super.onCreate()
@@ -65,13 +67,37 @@ class MeetingRecordingService : Service() {
         val action = intent?.action
         if (action == ACTION_START) {
             val id = intent.getStringExtra(EXTRA_MEETING_ID)
-            if (id.isNullOrBlank()) { if (meetingId == null) stopSelf(); return START_NOT_STICKY }
-            if (meetingId != null) return START_NOT_STICKY
-            try {
-                ServiceCompat.startForeground(this, NOTIFICATION_ID, notification("Preparing recording"), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-            } catch (_: Exception) {
-                RecordingProcessState.update(RecordingState.Failed(id, "Android did not allow microphone access. Open the app and try again."))
-                scope.launch { db.meetingDao().finish(id, RecordingStatus.FAILED, 0, null, System.currentTimeMillis(), "Microphone service start was not allowed"); stopSelf() }
+            // A service started with startForegroundService() MUST reach startForeground() or
+            // Android kills the whole process with ForegroundServiceDidNotStartInTimeException.
+            // Promote to the foreground before any early return.
+            val promoted = runCatching {
+                ServiceCompat.startForeground(this, NOTIFICATION_ID, notification("Preparing recording"), microphoneForegroundType())
+            }
+            if (promoted.isFailure) {
+                val failure = promoted.exceptionOrNull()
+                val message = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                    failure is android.app.ForegroundServiceStartNotAllowedException
+                ) {
+                    "Android blocked the recording because the app was not in the foreground. Open the app and try again."
+                } else {
+                    "Android did not allow microphone access. Open the app and try again."
+                }
+                RecordingProcessState.update(RecordingState.Failed(id, message))
+                if (!id.isNullOrBlank()) {
+                    scope.launch { runCatching { db.meetingDao().finish(id, RecordingStatus.FAILED, 0, null, System.currentTimeMillis(), message) } }
+                }
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf(startId)
+                return START_NOT_STICKY
+            }
+            if (id.isNullOrBlank()) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(startId); return START_NOT_STICKY }
+            if (meetingId != null) {
+                // Another capture owns the microphone. Failing loudly beats dropping the request
+                // and leaving the second meeting stuck on "Preparing".
+                RecordingProcessState.update(RecordingState.Failed(id, "Another meeting is already recording. Stop it first."))
+                scope.launch { runCatching { db.meetingDao().finish(id, RecordingStatus.FAILED, 0, null, System.currentTimeMillis(), "Another meeting is already recording.") } }
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf(startId)
                 return START_NOT_STICKY
             }
             scope.launch { commands.withLock { if (meetingId == null) startRecording(id) } }
@@ -84,9 +110,12 @@ class MeetingRecordingService : Service() {
                         ACTION_STOP -> stopRecording()
                         ACTION_BOOKMARK -> bookmark(intent?.getStringExtra(EXTRA_BOOKMARK_LABEL).orEmpty())
                     }
+                } catch (cancelled: CancellationException) {
+                    // A cancelled coroutine is not a recording failure.
+                    throw cancelled
                 } catch (_: Exception) { stopRecording("A recording control could not be completed") }
             } }
-        } else stopSelf()
+        } else stopSelf(startId)
         return START_NOT_STICKY
     }
 
@@ -97,9 +126,11 @@ class MeetingRecordingService : Service() {
             stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(); return
         }
         if (!AudioWorkCoordinator.startRecording(id)) {
-            val message = "Audio is busy processing or recovering. Try again when it finishes."
+            val message = "Audio is busy processing or recovering. Try again in a moment."
             RecordingProcessState.update(RecordingState.Failed(id, message))
-            runCatching { db.meetingDao().finish(id, RecordingStatus.FAILED, 0, null, System.currentTimeMillis(), message) }
+            // This is a retryable condition. Leaving the meeting in FAILED would make it
+            // permanently unrecordable, so the draft is put back to PREPARING.
+            runCatching { db.meetingDao().setStatus(id, RecordingStatus.PREPARING, System.currentTimeMillis()) }
             stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(); return
         }
         meetingId = id
@@ -117,13 +148,16 @@ class MeetingRecordingService : Service() {
             val bluetooth = input!!.start(options.bluetooth)
             if (options.bluetooth && !bluetooth) RecorderTelemetry.healthMutable.value = RecordingHealth(warning = "Bluetooth input is unavailable. Using system microphone routing.")
             val first = allocateSegment()
-            val prepared = MediaRecorderEngine(this).prepare(first, quality, bluetooth)
+            // MediaRecorder.prepare() opens the encoder and the output file. It can block for
+            // hundreds of milliseconds, so it must not run on the main thread.
+            val prepared = withContext(Dispatchers.IO) { MediaRecorderEngine(this@MeetingRecordingService).prepare(first, quality, bluetooth) }
             recorder = prepared.first
             session = session!!.copy(sampleRate = prepared.second.sampleRate ?: 0, bitRate = prepared.second.bitRate)
             journal("ENCODER_READY", "rate=${prepared.second.sampleRate ?: 0}; bitrate=${prepared.second.bitRate}; rollover=${prepared.second.rollover}")
             attachCallbacks(prepared.first)
-            recorder!!.start()
+            withContext(Dispatchers.IO) { recorder!!.start() }
             clock.start()
+            wallStartMs = System.currentTimeMillis()
             activeSequence = sequence
             paused = false
             db.audioSegmentDao().markWriting(id, activeSequence)
@@ -134,8 +168,11 @@ class MeetingRecordingService : Service() {
             if (!prepared.second.rollover) RecorderTelemetry.healthMutable.value = RecorderTelemetry.health.value.copy(warning = "This device uses a single audio file. Crash recovery may be limited.")
             updateNotification()
             storageJob = scope.launch { while (isActive) { delay(30_000); scope.launch { commands.withLock { checkStorage() } }.join() } }
-        } catch (_: Exception) {
-            stopRecording("Recording could not start. Check microphone permission, audio input and available storage.")
+        } catch (cancelled: CancellationException) {
+            // A cancelled coroutine is not a recording failure; let it propagate.
+            throw cancelled
+        } catch (failure: Exception) {
+            stopRecording("Recording could not start on this device (${failure.javaClass.simpleName}). Check microphone permission, audio input and available storage.")
         }
     }
 
@@ -157,8 +194,21 @@ class MeetingRecordingService : Service() {
                         checkStorage()
                         if (recorder === instance) {
                             val next = allocateSegment()
-                            instance.setNextOutputFile(next)
-                            nextSequence = sequence
+                            try {
+                                instance.setNextOutputFile(next)
+                                nextSequence = sequence
+                            } catch (failure: Exception) {
+                                // The device cannot roll over. Everything captured so far is intact,
+                                // so this is a warning, not a failure: drop the orphan file and row
+                                // and let the recording continue in the current segment.
+                                runCatching { journal("ROLLOVER_UNSUPPORTED", failure.javaClass.simpleName) }
+                                withContext(Dispatchers.IO) { runCatching { next.delete() } }
+                                db.audioSegmentDao().deleteSegment(requireNotNull(meetingId), sequence)
+                                nextSequence = null
+                                RecorderTelemetry.healthMutable.value = RecorderTelemetry.health.value.copy(
+                                    warning = "This device cannot split long recordings. The audio will stop at the segment limit."
+                                )
+                            }
                         }
                     }
                     MediaRecorder.MEDIA_RECORDER_INFO_NEXT_OUTPUT_FILE_STARTED -> {
@@ -169,9 +219,13 @@ class MeetingRecordingService : Service() {
                         validateSegment(finished)
                         journal("SEGMENT_ROTATED", "sequence=$activeSequence")
                     }
-                    MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED -> stopRecording("The device could not continue into the next audio segment")
+                    // The device hit its own size limit without a rollover. The audio captured
+                    // so far is valid, so this is a clean stop, not an error.
+                    MediaRecorder.MEDIA_RECORDER_INFO_MAX_FILESIZE_REACHED -> stopRecording(null)
                     else -> if (what == MediaRecorder.MEDIA_RECORDER_INFO_UNKNOWN) journal("ENCODER_INFO", "what=$what; extra=$extra")
                 }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (_: Exception) { stopRecording("The next audio segment could not be prepared") }
         } } }
         instance.setOnErrorListener { _, what, extra -> scope.launch { commands.withLock {
@@ -201,6 +255,7 @@ class MeetingRecordingService : Service() {
 
     private fun updateInput() {
         val current = recorder ?: return
+        // MediaRecorder.getRoutedDevice() was added in API 28.
         val label = if (Build.VERSION.SDK_INT >= 28) RecordingInputManager.label(runCatching { current.routedDevice?.type }.getOrNull()) else "System microphone"
         if (label != RecorderTelemetry.health.value.input) {
             RecorderTelemetry.healthMutable.value = RecorderTelemetry.health.value.copy(input = label, warning = if (clock.elapsedMs > 2000) "Microphone input changed. Check the selected input." else RecorderTelemetry.health.value.warning)
@@ -271,7 +326,11 @@ class MeetingRecordingService : Service() {
         val current = recorder
         runCatching { journal("FINALIZING") }
         current?.setOnInfoListener(null); current?.setOnErrorListener(null)
-        if (current != null) try { current.stop() } catch (_: Exception) { error = error ?: "The final segment could not be finalized" }
+        if (current != null) {
+            // MediaRecorder.stop() finalises the container and can block for a long time.
+            val stopFailure = withContext(Dispatchers.IO) { runCatching { current.stop() }.exceptionOrNull() }
+            if (stopFailure != null) error = error ?: "The final segment could not be finalized"
+        }
         releaseRecorder()
         try {
             offsetMs = 0
@@ -290,6 +349,9 @@ class MeetingRecordingService : Service() {
                 RecordingStatus.INTERRUPTED -> RecordingState.Interrupted(id, requireNotNull(error))
                 else -> RecordingState.Failed(id, error ?: "No audio was saved")
             })
+        } catch (cancelled: CancellationException) {
+            // A cancelled coroutine must not be reported as a metadata failure.
+            throw cancelled
         } catch (_: Exception) {
             RecordingProcessState.update(RecordingState.Failed(id, "Audio files were kept, but saving metadata failed. Reopen the app to recover them."))
         } finally {
@@ -323,10 +385,14 @@ class MeetingRecordingService : Service() {
 
     private fun notification(label: String = if (paused) "Recording paused" else "Recording · saved on this device"): Notification {
         val open = PendingIntent.getActivity(this, 10, Intent(this, MainActivity::class.java), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        fun action(name: String, request: Int) = PendingIntent.getService(this, request, Intent(this, MeetingRecordingService::class.java).setAction(name), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
-        return NotificationCompat.Builder(this, CHANNEL_ID).setSmallIcon(android.R.drawable.ic_btn_speak_now).setContentTitle("Meeting Atlas").setContentText(label)
+        // A notification action that may start the service must use getForegroundService.
+        fun action(name: String, request: Int) = PendingIntent.getForegroundService(this, request, Intent(this, MeetingRecordingService::class.java).setAction(name), PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        // The chronometer counts up from `when`. Using the wall-clock start of the capture
+        // keeps it correct across pause/resume, where the monotonic clock excludes pauses.
+        val whenMs = if (wallStartMs > 0L) wallStartMs else System.currentTimeMillis()
+        return NotificationCompat.Builder(this, CHANNEL_ID).setSmallIcon(com.meetingatlas.R.drawable.ic_notification).setContentTitle("Meeting Atlas").setContentText(label)
             .setContentIntent(open).setOngoing(true).setOnlyAlertOnce(true)
-            .setWhen(System.currentTimeMillis() - clock.elapsedMs).setUsesChronometer(recorder != null && !paused)
+            .setWhen(whenMs).setUsesChronometer(recorder != null && !paused)
             .apply { if (recorder != null) {
                 addAction(0, if (paused) "Resume" else "Pause", action(if (paused) ACTION_RESUME else ACTION_PAUSE, 11))
                 addAction(0, "Bookmark", action(ACTION_BOOKMARK, 13))
@@ -340,8 +406,18 @@ class MeetingRecordingService : Service() {
         if (recorder != null) { runCatching { recorder?.stop() }; releaseRecorder() }
         scope.cancel()
         serviceAlive = false
-        interrupted?.let { AudioWorkCoordinator.finishRecording(it) }
-        if (interrupted != null) (application as MeetingAtlasApplication).applicationScope.launch { RecordingRecoveryManager(applicationContext, db).recoverInterruptedSessions() }
+        // Never leave a stale notification behind with buttons that do nothing.
+        runCatching { stopForeground(STOP_FOREGROUND_REMOVE) }
+        getSystemService(NotificationManager::class.java).cancel(NOTIFICATION_ID)
+        interrupted?.let { id ->
+            AudioWorkCoordinator.finishRecording(id)
+            // The UI reads this flow. Leaving it on Recording/Paused freezes the screen
+            // on a live capture that no longer exists.
+            RecordingProcessState.update(RecordingState.Interrupted(id, "Recording was interrupted. Open the app to recover the audio."))
+        }
+        if (interrupted != null) (application as MeetingAtlasApplication).applicationScope.launch {
+            runCatching { RecordingRecoveryManager(applicationContext, db).recoverInterruptedSessions() }
+        }
         super.onDestroy()
     }
 
@@ -357,5 +433,13 @@ class MeetingRecordingService : Service() {
         private const val CHANNEL_ID = "meeting_recording"
         private const val NOTIFICATION_ID = 401
         private const val RESERVE_BYTES = 32L * 1024 * 1024
+
+        /**
+         * The microphone foreground-service type only exists from API 30. On older
+         * releases the platform ignores the type, so zero is passed instead of an
+         * inlined constant the device would not understand.
+         */
+        private fun microphoneForegroundType(): Int =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0
     }
 }

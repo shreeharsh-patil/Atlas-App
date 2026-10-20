@@ -10,9 +10,11 @@ import com.meetingatlas.recording.RecordingPreferences
 import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 
 enum class PipelineStep { CONTINUE, DONE, DEFER }
 
@@ -70,8 +72,13 @@ class NotesPipeline @Inject constructor(
     }
 
     suspend fun step(jobId: String): PipelineStep {
-        if (!AudioWorkCoordinator.startProcessing()) return PipelineStep.DEFER
-        return try { stepOwned(jobId) } finally { AudioWorkCoordinator.finishProcessing() }
+        val owner = AudioWorkCoordinator.startProcessing() ?: run {
+            // The reason is persisted so the screen can explain the wait instead of
+            // showing an unexplained spinner.
+            dao.job(jobId)?.let { dao.saveJob(it.copy(status = "WAITING", error = "Waiting for the recording to finish.", updatedAt = System.currentTimeMillis())) }
+            return PipelineStep.DEFER
+        }
+        return try { stepOwned(jobId) } finally { AudioWorkCoordinator.finishProcessing(owner) }
     }
 
     private suspend fun stepOwned(jobId: String): PipelineStep {
@@ -91,6 +98,18 @@ class NotesPipeline @Inject constructor(
             dao.saveJob(job.copy(status = "TRANSCRIBING", error = null, updatedAt = System.currentTimeMillis()))
             dao.saveState(state.copy(status = "TRANSCRIBING", updatedAt = System.currentTimeMillis()))
             val prepared = slices.prepare(chunk)
+            if (prepared.durationMs <= 0L) {
+                // The slice contains no audio. It is completed as empty so one bad chunk
+                // cannot dead-end the whole meeting.
+                db.withTransaction {
+                    dao.completeChunk(chunk.id)
+                    val current = requireNotNull(dao.state(job.meetingId))
+                    dao.saveState(current.copy(transcribedChunks = current.transcribedChunks + 1, updatedAt = System.currentTimeMillis()))
+                    dao.saveJob(job.copy(status = "RUNNING", error = null, updatedAt = System.currentTimeMillis()))
+                }
+                withContext(Dispatchers.IO) { prepared.file.delete(); prepared.file.parentFile?.delete() }
+                return PipelineStep.CONTINUE
+            }
             try {
                 val raw = client.transcribeTimed(prepared.file, key, job.transcriptionModel)
                 val transcript = TranscriptNormalizer.normalize(raw, job.meetingId, chunk.position, prepared.globalStartMs, prepared.durationMs)
@@ -132,9 +151,11 @@ class NotesPipeline @Inject constructor(
         db.withTransaction {
             if (dao.job(jobId)?.status == "CANCELLED") throw kotlinx.coroutines.CancellationException("Processing cancelled")
             val current = requireNotNull(dao.state(job.meetingId))
+            // The revision is bumped atomically so two concurrent jobs can never claim the
+            // same snapshot number and trip the unique index.
+            dao.bumpRevision(job.meetingId, finalStatus, current.summarizedOrder, System.currentTimeMillis())
             val revision = current.revision + 1
             dao.saveJob(job.copy(status = "SUCCEEDED", error = null, updatedAt = System.currentTimeMillis()))
-            dao.saveState(current.copy(status = finalStatus, revision = revision, updatedAt = System.currentTimeMillis()))
             dao.snapshot(SummarySnapshotEntity("${job.meetingId}:$revision", job.meetingId, revision, current.summarizedOrder, finalStatus, System.currentTimeMillis()))
         }
         cleanupAudio(job)
@@ -143,20 +164,29 @@ class NotesPipeline @Inject constructor(
 
     private suspend fun cleanupAudio(job: NotesJobEntity) {
         val state = dao.state(job.meetingId) ?: return
-        if (job.topicId == null && state.status == "FINALIZED" && state.audioDeletedAt == null && dao.entries(job.meetingId).isNotEmpty() && preferences.options.first().deleteAfterNotes) {
+        // An interrupted recording still has complete notes for the audio it captured,
+        // so the user's retention choice applies to it as well.
+        if (job.topicId == null && state.status in setOf("FINALIZED", "PARTIAL_AUDIO") && state.audioDeletedAt == null && dao.entries(job.meetingId).isNotEmpty() && preferences.options.first().deleteAfterNotes) {
             com.meetingatlas.playback.PlaybackInvalidation.invalidate(job.meetingId)
             if (files.deleteMeetingAudio(job.meetingId, files.segments(job.meetingId))) db.withTransaction {
                 db.meetingDao().clearAudioPath(job.meetingId, System.currentTimeMillis())
                 db.audioSegmentDao().deleteForMeeting(job.meetingId)
                 db.meetingAnalysisDao().markAudioDeleted(job.meetingId, System.currentTimeMillis())
-                val current = requireNotNull(dao.state(job.meetingId))
-                dao.saveState(current.copy(audioDeletedAt = System.currentTimeMillis()))
+                dao.markAudioDeleted(job.meetingId, System.currentTimeMillis())
             } else dao.job(job.id)?.let { dao.saveJob(it.copy(error = "Notes are saved, but source audio could not be removed. Use Remove source audio to retry.")) }
         }
     }
 
     suspend fun markFailure(jobId: String, message: String, status: String = "FAILED") {
-        dao.job(jobId)?.let { dao.saveJob(it.copy(status = status, error = message.take(400), updatedAt = System.currentTimeMillis())) }
+        dao.job(jobId)?.let { job ->
+            // A job that already succeeded must not be downgraded: its notes are committed
+            // and the error only describes a cleanup problem.
+            if (job.status == "SUCCEEDED") {
+                dao.saveJob(job.copy(error = message.take(400), updatedAt = System.currentTimeMillis()))
+            } else {
+                dao.saveJob(job.copy(status = status, error = message.take(400), updatedAt = System.currentTimeMillis()))
+            }
+        }
     }
     private fun providerKey() = settings.apiKey()?.takeIf { it.isNotBlank() } ?: error("Add an OpenRouter key in Settings, then retry. Saved progress is safe.")
     companion object { private const val CHUNK_US = 120_000_000L }

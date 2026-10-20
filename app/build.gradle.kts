@@ -1,4 +1,5 @@
 import java.util.Properties
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.android.application)
@@ -16,6 +17,13 @@ val localReleaseSigning = Properties().apply {
 val localReleaseKeystore = localReleaseSigning.getProperty("storeFile")?.let { rootProject.file(it) }
 val localReleaseSigningReady = localReleaseKeystore?.isFile == true &&
     listOf("storePassword", "keyAlias", "keyPassword").all { !localReleaseSigning.getProperty(it).isNullOrBlank() }
+val allowUnsignedRelease = providers.gradleProperty("allowUnsignedRelease").orNull == "true"
+if (!localReleaseSigningReady && !allowUnsignedRelease) {
+    logger.warn(
+        "No release signing key found at .release/signing.properties. The release variant will be " +
+            "UNSIGNED. Pass -PallowUnsignedRelease=true to acknowledge this deliberately."
+    )
+}
 
 android {
     namespace = "com.meetingatlas"
@@ -25,9 +33,11 @@ android {
         applicationId = "com.meetingatlas"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.4.1"
+        versionCode = 6
+        versionName = "0.5.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // x86/x86_64 are emulator-only; x86_64 is kept for ChromeOS.
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }
     }
 
     buildFeatures { compose = true; buildConfig = true }
@@ -45,22 +55,77 @@ android {
         getByName("release") {
             isMinifyEnabled = true
             isShrinkResources = true
-            if (localReleaseSigningReady) signingConfig = signingConfigs.getByName("releaseLocal")
+            signingConfig = if (localReleaseSigningReady) signingConfigs.getByName("releaseLocal") else null
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
+        // Escape hatch: -PnoShrink=true produces an unminified release for R8 bisection.
+        create("releaseNoShrink") {
+            initWith(getByName("release"))
+            isMinifyEnabled = false
+            isShrinkResources = false
+            matchingFallbacks += listOf("release")
+            applicationIdSuffix = ".noshrink"
+            versionNameSuffix = "-noshrink"
+        }
+    }
+    lint {
+        abortOnError = true
+        checkDependencies = true
+        warningsAsErrors = false
+        htmlReport = true
+        xmlReport = true
+        textReport = true
+        disable += setOf(
+            "GradleDependency",
+            "AndroidGradlePluginVersion",
+            "NewerVersionAvailable",
+            "OldTargetApi",
+            // kapt still works and is the only processor setup this project uses today.
+            "KaptUsageInsteadOfKsp",
+            // The launcher bitmap is the supplied brand artwork.
+            "IconLauncherShape",
+        )
+    }
+    testOptions {
+        unitTests {
+            isReturnDefaultValues = true
+            isIncludeAndroidResources = true
+            all {
+                it.useJUnit()
+                it.testLogging { events("passed", "skipped", "failed") }
+            }
+        }
+        animationsDisabled = true
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions { jvmTarget = "17" }
-    packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
+    packaging {
+        resources {
+            excludes += setOf(
+                "/META-INF/{AL2.0,LGPL2.1}",
+                "/META-INF/DEPENDENCIES",
+                "/META-INF/LICENSE*",
+                "/META-INF/NOTICE*",
+                "/META-INF/versions/9/OSGI-INF/MANIFEST.MF",
+                "DebugProbesKt.bin",
+            )
+        }
+        jniLibs { useLegacyPackaging = false }
+    }
     sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
 }
 
 kapt {
     correctErrorTypes = true
     arguments { arg("room.schemaLocation", "$projectDir/schemas") }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
 }
 
 dependencies {

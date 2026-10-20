@@ -1,5 +1,6 @@
 .gradle/
 .wrapper-bootstrap/
+.kotlin/
 **/build/
 local.properties
 .idea/
@@ -8,7 +9,16 @@ local.properties
 Thumbs.db
 *.jks
 *.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+.release/
 *.m4a
 *.wav
 *.mp3
-.release/
+*.aac
+*.amr
+*.ogg
+*.opus
+*.webm

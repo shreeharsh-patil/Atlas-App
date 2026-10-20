@@ -2,11 +2,21 @@
 
 Meeting Atlas is a native Kotlin and Jetpack Compose meeting recorder with Room-based local storage. Record, save, reopen and play segmented audio offline. Creating notes explicitly sends audio/transcript to OpenRouter, saves the results locally and applies the user's audio-retention setting. The default retains the earlier requested behavior of removing source audio only after notes are saved; turn this off in Settings to preserve playback.
 
-Version 0.4.1 refines home and recording screens, makes meeting lists lazy, and reduces repeated sorting/filtering work in notes. Version 0.4.0 added the supplied Meeting Atlas logo across the app and launcher, green brand styling, and signed release artifacts. Per the user's selected scope, transcription uses OpenRouter after recording is saved. [V3 implementation](docs/v3-notes.md) describes its contracts and limits; [V2 architecture and slice plan](docs/v2-plan.md) tracks the wider product scope. Device qualification and model-quality review remain required.
+Version 0.5.0 is the design and reliability release. It introduces the Meeting Atlas
+design system: **Lobster** for the wordmark and screen titles, **Lobster Two** for true
+italic display accents, **Lora** as the reading face with real italics, and **Manrope**
+for interface chrome. The home screen is now a hero panel over a deep green wash with
+the supplied mark, a brass accent and raised cards. The same iteration fixes a wide set
+of recording, playback, notes and build defects; see [release notes](docs/release.md)
+for the full list. Per the user's selected scope, transcription uses OpenRouter after
+recording is saved. [V3 implementation](docs/v3-notes.md) describes its contracts and
+limits; [V2 architecture and slice plan](docs/v2-plan.md) tracks the wider product
+scope. Device qualification and model-quality review remain required.
 
 ## Current implementation
 
-- Native Compose home, recent-meeting list, library, meeting detail, OpenRouter settings, and recording screens.
+- Native Compose home, recent-meeting list, library, meeting detail, OpenRouter settings, and recording screens, built on a shared design system (`ui/theme/Type.kt`, `ui/theme/Theme.kt`, `ui/AtlasComponents.kt`).
+- Four bundled type families (Lobster, Lobster Two, Lora, Manrope — all SIL OFL 1.1) with a complete Material 3 typography scale, a corner-radius scale and a brand palette.
 - Hilt dependency injection and a Room-backed local meeting catalog.
 - Microphone permission flow and a microphone foreground service started from an explicit user action.
 - AAC/MPEG-4 mono capture to app-private files, pause/resume/stop notification controls, and monotonic elapsed timing.
@@ -43,19 +53,21 @@ Room is the catalog source of truth. Audio is stored under app-private `files/re
 
 ## Build
 
-Requirements: JDK 17+, Android SDK Platform 36, and Android Gradle Plugin-compatible Gradle (8.13 for AGP 8.13). Open this directory in Android Studio or use the Gradle wrapper once generated. Set `ANDROID_HOME` to your Android SDK location if it is not already configured.
+Requirements: JDK 17+, Android SDK Platform 36, and Gradle 8.13 (bundled with the committed wrapper; AGP is pinned to 8.13.2 in `gradle/libs.versions.toml`). Open this directory in Android Studio or run `./gradlew.bat` / `./gradlew` directly. Set `ANDROID_HOME` to your Android SDK location if it is not already configured.
 
 ```powershell
 ./gradlew.bat :app:assembleDebug
 ./gradlew.bat :app:testDebugUnitTest
 ./gradlew.bat :app:assembleDebugAndroidTest
 ./gradlew.bat :app:lintDebug
-python tools/check_migrations.py
+py -3 tools/check_migrations.py
 # With a connected Android device:
 ./gradlew.bat :app:connectedDebugAndroidTest
 ```
 
-Installable debug APK output is `app/build/outputs/apk/debug/app-debug.apk`.
+Installable debug APK output is `app/build/outputs/apk/debug/app-debug.apk`. The signed
+release APK is `app/build/outputs/apk/release/app-release.apk`; see
+[release preparation](docs/release.md) for the signing setup and checksums.
 
 ## Recording limits and verification
 

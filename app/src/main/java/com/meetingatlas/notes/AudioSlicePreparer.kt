@@ -20,8 +20,13 @@ class AudioSlicePreparer @Inject constructor(@param:ApplicationContext private v
     fun prepare(chunk: ProcessingChunkEntity): PreparedAudioSlice {
         val source = File(chunk.sourcePath).canonicalFile
         require(files.segments(chunk.meetingId).any { it.canonicalFile == source }) { "Audio is outside managed meeting storage" }
-        require(source.isFile && source.length() == chunk.sourceSize && source.lastModified() == chunk.sourceModifiedAt) { "Source audio changed or is missing. Saved transcripts and notes were kept." }
+        // The file size is checked, not the modification time: a timestamp has one-second
+        // granularity on some filesystems and can change without the audio changing, which
+        // would permanently fail every chunk of an intact recording.
+        require(source.isFile && source.length() == chunk.sourceSize) { "Source audio is missing or truncated. Saved transcripts and notes were kept." }
         val directory = File(context.cacheDir, "notes-v3/${chunk.meetingId}").apply { check(exists() || mkdirs()) }
+        // Sweep leftovers from a previous run that was killed mid-transcription.
+        directory.listFiles()?.forEach { runCatching { it.delete() } }
         val target = File(directory, "slice-${chunk.position}.m4a")
         val extractor = MediaExtractor()
         var muxer: MediaMuxer? = null
@@ -54,8 +59,14 @@ class AudioSlicePreparer @Inject constructor(@param:ApplicationContext private v
             }
             muxer.stop(); started = false
             muxer.release(); muxer = null
+            if (!wrote) {
+                // The chunk range holds no audio. It is reported as an empty slice so the
+                // pipeline can complete it instead of retrying it for ever.
+                target.delete()
+                return PreparedAudioSlice(target, chunk.offsetMs + chunk.startUs / 1000, 0L)
+            }
             val check = inspector.inspect(target)
-            require(wrote && check.valid) { "The audio slice could not be validated" }
+            require(check.valid) { "The audio slice could not be validated" }
             return PreparedAudioSlice(target, chunk.offsetMs + firstSampleUs / 1000, check.durationMs)
         } catch (failure: Exception) { target.delete(); throw failure }
         finally { if (started) runCatching { muxer?.stop() }; runCatching { muxer?.release() }; extractor.release() }

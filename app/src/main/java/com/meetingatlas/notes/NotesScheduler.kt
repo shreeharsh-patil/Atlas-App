@@ -19,10 +19,17 @@ interface NotesWorkerDependencies { fun pipeline(): NotesPipeline }
 @Singleton
 class NotesScheduler @Inject constructor(@param:ApplicationContext private val context: Context, private val pipeline: NotesPipeline) {
     suspend fun enqueue(meetingId: String, template: MeetingTemplate, charging: Boolean, topicId: String? = null): String = withContext(Dispatchers.IO) {
-        val id = pipeline.prepare(meetingId, template, topicId)
-        try { WorkManager.getInstance(context).enqueueUniqueWork(id, ExistingWorkPolicy.KEEP, request(id, charging)).result.get() }
-        catch (failure: Exception) { pipeline.markFailure(id, "Could not queue processing. Saved evidence is safe; retry."); throw failure }
-        id
+        val jobId = if (topicId == null) "notes-$meetingId" else "topic-$topicId"
+        try {
+            val id = pipeline.prepare(meetingId, template, topicId)
+            WorkManager.getInstance(context).enqueueUniqueWork(id, ExistingWorkPolicy.KEEP, request(id, charging)).result.get()
+            id
+        } catch (failure: Exception) {
+            // The failure is persisted so the Notes screen can show it. A job row that only
+            // exists in a transient snackbar would leave the screen looking idle.
+            runCatching { pipeline.markFailure(jobId, failure.message ?: "Could not queue processing. Saved evidence is safe; retry.") }
+            throw failure
+        }
     }
     suspend fun cancel(jobId: String) = withContext(Dispatchers.IO) {
         pipeline.markFailure(jobId, "Processing paused. Completed transcript and notes have been kept.", "CANCELLED")

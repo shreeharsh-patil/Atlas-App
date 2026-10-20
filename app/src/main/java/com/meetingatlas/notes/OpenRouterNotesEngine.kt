@@ -7,26 +7,48 @@ import org.json.JSONArray
 import org.json.JSONObject
 import javax.inject.Inject
 
-@Serializable data class TimedSpeech(val text: String, val start: Double? = null, val end: Double? = null)
-@Serializable data class TranscriptionResponse(val text: String = "", val segments: List<TimedSpeech> = emptyList())
+@Serializable data class TimedSpeech(val text: String = "", val start: Double? = null, val end: Double? = null)
+@Serializable data class TranscriptionResponse(val text: String? = null, val segments: List<TimedSpeech>? = null)
 
 object TranscriptNormalizer {
-    private val wireJson = Json { ignoreUnknownKeys = true }
+    private val wireJson = Json { ignoreUnknownKeys = true; isLenient = true; coerceInputValues = true }
+
+    /**
+     * Provider timestamps are relative to the decoded stream, which routinely differs from
+     * the container duration by the AAC encoder delay. A small overrun is therefore clamped
+     * instead of rejected, otherwise one slightly-off segment kills the whole meeting.
+     */
+    private const val TOLERANCE_MS = 2_000L
+
     fun normalize(raw: String, meetingId: String, chunk: Int, startMs: Long, durationMs: Long): List<EvidenceSource> {
         val result = wireJson.decodeFromString<TranscriptionResponse>(raw)
-        require(result.segments.size <= 2048 && durationMs > 0) { "Invalid transcription response" }
-        val pieces = result.segments.ifEmpty { if (result.text.isBlank()) emptyList() else listOf(TimedSpeech(result.text)) }
+        require(result.segments.orEmpty().size <= 2048 && durationMs > 0) { "Invalid transcription response" }
+        // Several providers return "segments": null for silence and a plain transcript for
+        // short audio. Both are legitimate and must not abort the chunk.
+        val pieces = result.segments.orEmpty().ifEmpty {
+            if (result.text.isNullOrBlank()) emptyList() else listOf(TimedSpeech(result.text))
+        }
         var sequence = 0
         var previousStart = -1L
         return pieces.flatMap { piece ->
             val precise = piece.start != null && piece.end != null
-            val localStart = if (precise) {
-                require(piece.start!!.isFinite() && piece.end!!.isFinite() && piece.start >= 0 && piece.end > piece.start && piece.end * 1000 <= durationMs + 200) { "Provider timestamps are outside the saved audio" }
-                (piece.start * 1000).toLong()
-            } else 0L
-            val localEnd = if (precise) (piece.end!! * 1000).toLong().coerceAtMost(durationMs) else durationMs
-            require(localStart >= previousStart && localEnd > localStart) { "Provider timestamps are not ordered" }
-            previousStart = localStart
+            val localStart: Long
+            val localEnd: Long
+            if (precise) {
+                val rawStart = piece.start!!
+                val rawEnd = piece.end!!
+                require(rawStart.isFinite() && rawEnd.isFinite() && rawStart >= 0 && rawEnd > rawStart) { "Provider timestamps are invalid" }
+                val startValue = (rawStart * 1000).toLong()
+                val endValue = (rawEnd * 1000).toLong()
+                require(startValue <= durationMs + TOLERANCE_MS && endValue <= durationMs + TOLERANCE_MS) { "Provider timestamps are outside the saved audio" }
+                localStart = startValue.coerceIn(0, durationMs)
+                localEnd = endValue.coerceIn(localStart + 1, durationMs)
+                // Overlapping or out-of-order segments are tolerated rather than fatal.
+                previousStart = maxOf(previousStart, localStart)
+            } else {
+                localStart = 0L
+                localEnd = durationMs
+            }
             piece.text.chunked(TranscriptWindows.MAX_SOURCE_CHARS).filter { it.isNotBlank() }.map { text ->
                 require(sequence < 10000) { "Too many transcript segments in one chunk" }
                 EvidenceSource("$meetingId:c$chunk:s$sequence", chunk * 10000 + sequence++, text, startMs + localStart, startMs + localEnd, if (precise) "PROVIDER_SEGMENT" else "CHUNK")

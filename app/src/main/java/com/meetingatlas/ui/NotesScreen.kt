@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
@@ -33,10 +34,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.meetingatlas.data.*
 import com.meetingatlas.notes.*
 import com.meetingatlas.recording.formatRecordingTime
+import com.meetingatlas.ui.theme.AtlasTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+
+/** Characters that are not safe in an exported file name. Compiled once, not on every tap. */
+private val UnsafeFileChars = Regex("[^A-Za-z0-9 ._-]")
 
 @Composable
 internal fun MeetingTemplatePicker(value: MeetingTemplate, onChange: (MeetingTemplate) -> Unit) {
@@ -51,11 +56,12 @@ internal fun MeetingTemplatePicker(value: MeetingTemplate, onChange: (MeetingTem
 
 @Composable
 private fun NotePanel(title: String? = null, content: @Composable ColumnScope.() -> Unit) {
-    Surface(shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface, border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            title?.let { Text(it, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold) }
-            content()
+    AtlasCard {
+        title?.let {
+            Text(it, style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+            Spacer(Modifier.height(10.dp))
         }
+        content()
     }
 }
 
@@ -71,7 +77,15 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
     var tab by rememberSaveable(meeting.id) { mutableIntStateOf(0) }
     var view by rememberSaveable(meeting.id) { mutableStateOf(SummaryView.STANDARD) }
     var sourceLimit by rememberSaveable(meeting.id) { mutableIntStateOf(100) }
-    var transcriptQuery by rememberSaveable(meeting.id) { mutableStateOf("") }
+    var rawQuery by rememberSaveable(meeting.id) { mutableStateOf("") }
+    // The query is debounced so a burst of keystrokes issues one database query, not one per key.
+    var transcriptQuery by remember(rawQuery) { mutableStateOf(rawQuery) }
+    LaunchedEffect(rawQuery) {
+        if (rawQuery != transcriptQuery) {
+            delay(280)
+            transcriptQuery = rawQuery
+        }
+    }
     // One extra row tells us whether more matches exist, so "Load more" is never offered at the end.
     val transcriptRows by remember(meeting.id, sourceLimit, transcriptQuery) { viewModel.searchTranscript(meeting.id, transcriptQuery, sourceLimit + 1) }.collectAsStateWithLifecycle(initialValue = emptyList())
     val transcript = remember(transcriptRows, sourceLimit) { transcriptRows.take(sourceLimit) }
@@ -98,7 +112,9 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
         jobs.firstOrNull { it.status == "SUCCEEDED" }?.takeIf { it.error != null }?.error
     } else null
     val canRefresh = activeJobs.isEmpty() && document.state.status in setOf("FINALIZED", "PARTIAL_AUDIO")
-    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/markdown")) { uri ->
+    // The launcher keeps only the first instance, so the contract must not be rebuilt on every recomposition.
+    val exportContract = remember { ActivityResultContracts.CreateDocument("text/markdown") }
+    val export = rememberLauncherForActivityResult(exportContract) { uri ->
         if (uri != null) scope.launch {
             try {
                 withContext(Dispatchers.IO) {
@@ -115,20 +131,40 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
     val entriesInMapByTopic = remember(document.entries) { document.entries.filter { it.inMap }.groupBy { it.topicId } }
     val orderedTopics = remember(document.topics) { document.topics.sortedBy { it.position } }
     val orderedChapters = remember(document.chapters) { document.chapters.sortedBy { it.startMs } }
-    Scaffold(snackbarHost = { SnackbarHost(snackbar) }, topBar = {
-        TopAppBar(title = { Text(meeting.title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium) }, navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } }, actions = {
-            Box {
-                IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Meeting actions") }
-                DropdownMenu(menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text("Rename meeting") }, onClick = { menu = false; title = meeting.title; rename = true })
-                    DropdownMenuItem(text = { Text("Export ${view.name.lowercase()} notes") }, onClick = { menu = false; export.launch("${meeting.title.take(60).replace(Regex("[^A-Za-z0-9 ._-]"), "_")}-notes.md") })
-                    DropdownMenuItem(text = { Text("OpenRouter settings") }, onClick = { menu = false; onSettings() })
-                    if (onPreviousNotes != null) DropdownMenuItem(text = { Text("Previous saved notes") }, onClick = { menu = false; onPreviousNotes() })
-                    DropdownMenuItem(text = { Text("Delete meeting") }, enabled = activeJobs.isEmpty(), onClick = { menu = false; confirmDelete = true })
+    // Filtering on every recomposition (which happens on every playback tick) is wasteful.
+    val topicEntries = remember(document.entries, selectedTopic?.id) {
+        selectedTopic?.let { topic -> document.entries.filter { it.topicId == topic.id } }.orEmpty()
+    }
+    Scaffold(
+        snackbarHost = { SnackbarHost(snackbar) },
+        topBar = {
+            TopAppBar(
+                title = { Text(meeting.title, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, style = MaterialTheme.typography.titleMedium) },
+                navigationIcon = { IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") } },
+                actions = {
+                    Box {
+                        IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Meeting actions") }
+                        DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                            DropdownMenuItem(text = { Text("Rename meeting") }, onClick = { menu = false; title = meeting.title; rename = true })
+                            DropdownMenuItem(text = { Text("Export ${view.name.lowercase()} notes") }, onClick = { menu = false; export.launch("${meeting.title.take(60).replace(UnsafeFileChars, "_")}-notes.md") })
+                            DropdownMenuItem(text = { Text("OpenRouter settings") }, onClick = { menu = false; onSettings() })
+                            if (onPreviousNotes != null) DropdownMenuItem(text = { Text("Previous saved notes") }, onClick = { menu = false; onPreviousNotes() })
+                            DropdownMenuItem(text = { Text("Delete meeting") }, enabled = activeJobs.isEmpty(), onClick = { menu = false; confirmDelete = true })
+                        }
+                    }
+                },
+            )
+        },
+        bottomBar = {
+            // The player owns a MediaController. Inside a LazyColumn it would be disposed
+            // as soon as it scrolled out of view, which stopped playback mid-meeting.
+            if (meeting.audioPath != null) {
+                Box(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                    MeetingPlayer(meeting, segments, viewModel, seek) { seek = null }
                 }
             }
-        })
-    }) { inset ->
+        },
+    ) { inset ->
         LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(inset), contentPadding = PaddingValues(horizontal = 22.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item(key = "status") {
                 val label = when (document.state.status) { "FINALIZED" -> "Final notes · source linked"; "NO_SPEECH" -> "No speech detected · source audio kept"; "PARTIAL_AUDIO" -> "Available audio processed · recording interrupted"; "TRANSCRIBING" -> "Transcribing saved audio"; "QUEUED" -> "Queued for processing"; else -> "Draft notes · processing incomplete" }
@@ -140,7 +176,7 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
                     Text(activeJobs.first().status.lowercase().replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.titleSmall)
                     Text("${document.state.transcribedChunks} of ${document.state.expectedChunks} audio chunks saved. Processing waits for network, battery and recording availability.", style = MaterialTheme.typography.bodySmall)
                     LinearProgressIndicator(Modifier.fillMaxWidth())
-                    TextButton(onClick = { activeJobs.forEach { viewModel.cancelNotes(it.id) } }) { Text("Pause processing") }
+                    TextButton(onClick = { activeJobs.forEach { viewModel.cancelNotes(it.id) } }) { Text("Pause all processing") }
                 }
             }
             latestFailure?.let { failed -> item(key = "retry") {
@@ -154,7 +190,6 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
             if (document.state.status == "NO_SPEECH" && activeJobs.isEmpty() && meeting.audioPath != null) item(key = "retry-speech") {
                 OutlinedButton(onClick = { confirmRetranscribe = true }) { Text("Try transcription again") }
             }
-            if (meeting.audioPath != null) item(key = "player") { MeetingPlayer(meeting, segments, viewModel, seek) { seek = null } }
             if (bookmarks.isNotEmpty()) item(key = "bookmarks") {
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     bookmarks.forEach { mark -> AssistChip(onClick = { seek = PlaybackSeek(mark.elapsedMs); scope.launch { listState.scrollToItem(0) } }, enabled = meeting.audioPath != null, label = { Text("${formatRecordingTime(mark.elapsedMs)} ${mark.label}".trim()) }) }
@@ -190,7 +225,7 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
                     }
                 }
             } else if (tab == 1) {
-                item(key = "query") { OutlinedTextField(value = transcriptQuery, onValueChange = { transcriptQuery = it.take(160); sourceLimit = 100 }, label = { Text("Search transcript") }, modifier = Modifier.fillMaxWidth(), singleLine = true) }
+                item(key = "query") { OutlinedTextField(value = rawQuery, onValueChange = { rawQuery = it.take(160); sourceLimit = 100 }, label = { Text("Search transcript") }, modifier = Modifier.fillMaxWidth(), singleLine = true, shape = RoundedCornerShape(14.dp)) }
                 items(transcript, key = { it.id }) { source ->
                     NotePanel {
                         source.startMs?.let { time ->
@@ -202,7 +237,7 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
                 if (hasMoreTranscript) item(key = "more-sources") { OutlinedButton(onClick = { sourceLimit += 100 }, modifier = Modifier.fillMaxWidth()) { Text("Load more transcript") } }
                 if (transcript.isEmpty()) item(key = "no-sources") {
                     Text(
-                        if (transcriptQuery.isBlank()) "No finalized transcript segments are saved yet." else "No transcript segments match “$transcriptQuery”.",
+                        if (rawQuery.isBlank()) "No finalized transcript segments are saved yet." else "No transcript segments match “$rawQuery”.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.secondary,
                     )
@@ -234,7 +269,7 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
         NoteEntrySheet(current, meeting.audioPath != null, viewModel, onDismiss = { selectedEntry = null }, onSeek = { time -> selectedEntry = null; seek = PlaybackSeek(time); scope.launch { listState.scrollToItem(0) } }, onMap = { selectedEntry = null; tab = 2; selectedTopic = document.topics.firstOrNull { it.id == entry.topicId } })
     }
     selectedTopic?.let { topic ->
-        TopicSheet(topic, document.entries.filter { it.topicId == topic.id }, viewModel, canRefresh, onDismiss = { selectedTopic = null }, onEntry = { selectedTopic = null; selectedEntry = it }, onRefresh = { selectedTopic = null; refreshTopic = topic })
+        TopicSheet(topic, topicEntries, viewModel, canRefresh, onDismiss = { selectedTopic = null }, onEntry = { selectedTopic = null; selectedEntry = it }, onRefresh = { selectedTopic = null; refreshTopic = topic })
     }
     chapter?.let { c -> ChapterSheet(c, viewModel, meeting.audioPath != null, onDismiss = { chapter = null }, onSeek = { chapter = null; seek = PlaybackSeek(c.startMs); scope.launch { listState.scrollToItem(0) } }, onEntry = { chapter = null; selectedEntry = it }) }
     refreshTopic?.let { topic -> AlertDialog(onDismissRequest = { refreshTopic = null }, title = { Text("Refresh ${topic.title}?") }, text = { Text("Only this topic's saved transcript evidence is sent to OpenRouter. Existing manual edits are preserved; proposed replacements appear in revision history.") }, confirmButton = { TextButton(onClick = { refreshTopic = null; viewModel.queueNotes(meeting.id, template, topicId = topic.id) }) { Text("Refresh topic") } }, dismissButton = { TextButton(onClick = { refreshTopic = null }) { Text("Cancel") } }) }
@@ -246,16 +281,44 @@ internal fun NotesScreen(meeting: MeetingEntity, document: NotesDocument, viewMo
 
 @Composable
 private fun NoteEntryCard(entry: NoteEntryEntity, viewModel: HomeViewModel, onOpen: () -> Unit) {
-    Surface(modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen), color = if (entry.highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val background = if (entry.highlighted) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
+    Surface(
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
+        color = background,
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, AtlasTheme.colors.cardBorder),
+    ) {
+        Column(Modifier.padding(17.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(entry.section.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() }, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
-                if (entry.section == "ACTION") Checkbox(checked = entry.completed, onCheckedChange = { viewModel.completeAction(entry.id, it) }, modifier = Modifier.semantics { contentDescription = "Complete action: ${entry.text}" })
+                Text(
+                    entry.section.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f),
+                )
+                if (entry.section == "ACTION") {
+                    Checkbox(
+                        checked = entry.completed,
+                        onCheckedChange = { viewModel.completeAction(entry.id, it) },
+                        modifier = Modifier.semantics { contentDescription = "Complete action: ${entry.text}" },
+                    )
+                }
             }
             Text(entry.text, style = MaterialTheme.typography.bodyLarge)
-            val meta = listOfNotNull(entry.owner?.let { "Owner: $it" }, entry.deadline?.let { "Due: $it" }).joinToString(" · ")
-            if (meta.isNotBlank()) Text(meta, style = MaterialTheme.typography.bodySmall)
-            Text(when { entry.supersededBy != null -> "Revised later · open history"; entry.userEdited -> "User edited · sources and history"; entry.verification == "UNCERTAIN" -> "Uncertain · review transcript evidence"; else -> "Source linked · open evidence" }, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+            val meta = listOfNotNull(entry.owner?.let { "Owner: $it" }, entry.deadline?.let { "Due: $it" }).joinToString(META_SEPARATOR)
+            if (meta.isNotBlank()) {
+                Text(meta, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+            }
+            Text(
+                when {
+                    entry.supersededBy != null -> "Revised later · open history"
+                    entry.userEdited -> "User edited · sources and history"
+                    entry.verification == "UNCERTAIN" -> "Uncertain · review transcript evidence"
+                    else -> "Source linked · open evidence"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.secondary,
+            )
         }
     }
 }
@@ -268,8 +331,10 @@ private fun NoteEntrySheet(entry: NoteEntryEntity, hasAudio: Boolean, viewModel:
     var error by remember { mutableStateOf<String?>(null) }
     val history by remember(entry.id) { viewModel.observeNoteHistory(entry.id) }.collectAsStateWithLifecycle(initialValue = emptyList())
     var editing by remember { mutableStateOf(false) }
-    var editingRevision by remember(entry.id) { mutableIntStateOf(entry.revision) }
-    var draft by remember(entry.id) { mutableStateOf(entry.text) }
+    // The draft is keyed by the revision: if the pipeline rewrites the note while the sheet
+    // is open, the stale draft would be saved against a revision that no longer exists.
+    var editingRevision by remember(entry.id, entry.revision) { mutableIntStateOf(entry.revision) }
+    var draft by remember(entry.id, entry.revision) { mutableStateOf(entry.text) }
     var showHistory by remember { mutableStateOf(false) }
     var copied by remember(entry.id) { mutableStateOf(false) }
     LaunchedEffect(copied) { if (copied) { delay(2_000); copied = false } }
@@ -303,9 +368,17 @@ private fun NoteEntrySheet(entry: NoteEntryEntity, hasAudio: Boolean, viewModel:
             Text("These links locate the supporting quotes. Review the source to judge the note's accuracy.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
             evidence.forEach { source ->
                 NotePanel {
-                    Text("“${source.quote}”", style = MaterialTheme.typography.bodyLarge)
-                    if (source.sourceRevision != source.currentRevision) Text("The transcript has changed since this citation was saved.", color = MaterialTheme.colorScheme.error)
-                    source.startMs?.let { time -> TextButton(onClick = { onSeek(time) }, enabled = hasAudio) { Text("${formatRecordingTime(time)}${if (source.precision == "CHUNK") " · approximate chunk interval" else " · open recording"}") } } ?: Text("Original transcript · timestamp unavailable", style = MaterialTheme.typography.bodySmall)
+                    // A pull quote in the italic serif face, with the transcript beneath it.
+                    AtlasQuote(text = "“${source.quote}”", attribution = source.startMs?.let { time -> formatRecordingTime(time) })
+                    if (source.sourceRevision != source.currentRevision) {
+                        Text("The transcript has changed since this citation was saved.", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                    }
+                    source.startMs?.let { time ->
+                        TextButton(onClick = { onSeek(time) }, enabled = hasAudio) {
+                            Text("${formatRecordingTime(time)}${if (source.precision == "CHUNK") " · approximate chunk interval" else " · open recording"}")
+                        }
+                    } ?: Text("Original transcript · timestamp unavailable", style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(4.dp))
                     Text(source.text, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary)
                 }
             }

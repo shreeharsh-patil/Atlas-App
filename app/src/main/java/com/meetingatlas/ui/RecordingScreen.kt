@@ -13,6 +13,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -27,10 +28,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.*
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -40,6 +39,8 @@ import com.meetingatlas.BuildConfig
 import com.meetingatlas.data.MeetingEntity
 import com.meetingatlas.data.RecordingStatus
 import com.meetingatlas.recording.*
+import com.meetingatlas.ui.theme.AtlasTheme
+import com.meetingatlas.ui.theme.LocalAtlasTextStyles
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 
@@ -51,7 +52,8 @@ internal fun recordingElapsed(state: RecordingState, fallback: Long = 0): Long {
         owner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             if (state is RecordingState.Recording) while (true) {
                 elapsed = state.elapsedBeforeStart + SystemClock.elapsedRealtime() - state.startedAtElapsed
-                delay(1000)
+                // 250 ms keeps the digits from visibly stuttering on a one-second tick.
+                delay(250)
             } else elapsed = if (state is RecordingState.Paused) state.elapsedMs else fallback
         }
     }
@@ -61,18 +63,36 @@ internal fun recordingElapsed(state: RecordingState, fallback: Long = 0): Long {
 @Composable
 internal fun ActiveRecordingBar(title: String, state: RecordingState, onOpen: () -> Unit) {
     val elapsed = recordingElapsed(state)
+    val live = state !is RecordingState.Paused
     Surface(
-        color = MaterialTheme.colorScheme.primaryContainer,
-        modifier = Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onOpen).semantics(mergeDescendants = true) {},
+        color = if (live) AtlasTheme.colors.liveContainer else MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onOpen, onClickLabel = "Open the recording").semantics(mergeDescendants = true) {},
     ) {
         Row(Modifier.padding(horizontal = 20.dp, vertical = 12.dp).heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
+            if (live) {
+                Box(Modifier.size(9.dp).background(AtlasTheme.colors.live, CircleShape))
+            } else {
+                Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(18.dp))
+            }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text(if (state is RecordingState.Paused) "Recording paused" else if (state is RecordingState.Finalizing) "Saving recording" else "Recording in progress", style = MaterialTheme.typography.labelMedium)
-                Text(title, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                Text(
+                    when {
+                        state is RecordingState.Paused -> "Recording paused"
+                        state is RecordingState.Finalizing -> "Saving recording"
+                        else -> "Recording in progress"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (live) AtlasTheme.colors.onLiveContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    title,
+                    style = MaterialTheme.typography.bodySmall,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                )
             }
-            Text(formatRecordingTime(elapsed), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium)
+            Text(formatRecordingTime(elapsed), style = LocalAtlasTextStyles.current.timerSmall)
         }
     }
 }
@@ -81,17 +101,27 @@ internal fun ActiveRecordingBar(title: String, state: RecordingState, onOpen: ()
 private fun MicrophoneWaveform(recording: Boolean) {
     val owner = LocalLifecycleOwner.current
     val samples = remember { FloatArray(64) }
-    var cursor by remember { mutableIntStateOf(0) }
+    val cursor = remember { mutableIntStateOf(0) }
     LaunchedEffect(recording, owner) {
-        if (recording) owner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            RecorderTelemetry.amplitude.collect { amplitude -> samples[cursor % samples.size] = amplitude; cursor++ }
-        } else { samples.fill(0f); cursor = 0 }
+        if (recording) {
+            owner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                RecorderTelemetry.amplitude.collect { amplitude ->
+                    samples[cursor.intValue % samples.size] = amplitude
+                    cursor.intValue++
+                }
+            }
+        } else {
+            samples.fill(0f)
+            cursor.intValue = 0
+        }
     }
     val color = MaterialTheme.colorScheme.primary
     Canvas(Modifier.fillMaxWidth().height(86.dp).clearAndSetSemantics { contentDescription = if (recording) "Live microphone amplitude" else "Microphone inactive" }) {
         val step = size.width / samples.size
+        // The cursor is read inside the draw lambda, so the canvas redraws on every sample.
+        val offset = cursor.intValue
         for (i in samples.indices) {
-            val value = samples[(cursor + i) % samples.size]
+            val value = samples[(offset + i) % samples.size]
             val height = (value * size.height * 0.85f).coerceAtLeast(2.dp.toPx())
             val x = (i + 0.5f) * step
             drawLine(color.copy(alpha = if (recording) 0.8f else 0.25f), Offset(x, (size.height - height) / 2), Offset(x, (size.height + height) / 2), 3.dp.toPx(), StrokeCap.Round)
@@ -155,8 +185,14 @@ internal fun RecordingScreenV2(meeting: MeetingEntity?, viewModel: HomeViewModel
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to meetings") }
                 Column(Modifier.weight(1f).padding(start = 8.dp)) {
-                    Text("RECORDING", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.5.sp)
-                    Text(meeting?.title ?: "New meeting", style = MaterialTheme.typography.titleMedium, maxLines = 3)
+                    AtlasEyebrow("Recording")
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        meeting?.title ?: "New meeting",
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 2,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                    )
                 }
             }
             val statusText = when {
@@ -171,31 +207,47 @@ internal fun RecordingScreenV2(meeting: MeetingEntity?, viewModel: HomeViewModel
                 else -> "Ready to record"
             }
             Surface(
-                modifier = Modifier.fillMaxWidth().padding(top = 34.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 26.dp),
                 color = MaterialTheme.colorScheme.surface,
-                shape = RoundedCornerShape(24.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                shape = RoundedCornerShape(26.dp),
+                border = BorderStroke(1.dp, AtlasTheme.colors.cardBorder),
+                shadowElevation = 8.dp,
             ) {
                 Column(
-                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 24.dp),
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 26.dp),
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
-                    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = RoundedCornerShape(50)) {
+                    Surface(
+                        color = when {
+                            recording -> AtlasTheme.colors.liveContainer
+                            paused -> MaterialTheme.colorScheme.surfaceVariant
+                            else -> MaterialTheme.colorScheme.primaryContainer
+                        },
+                        shape = RoundedCornerShape(percent = 50),
+                    ) {
                         Text(
                             statusText,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp).semantics { liveRegion = LiveRegionMode.Polite },
-                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp).semantics { liveRegion = LiveRegionMode.Polite },
+                            color = when {
+                                recording -> AtlasTheme.colors.onLiveContainer
+                                paused -> MaterialTheme.colorScheme.onSurfaceVariant
+                                else -> MaterialTheme.colorScheme.onPrimaryContainer
+                            },
                             style = MaterialTheme.typography.labelLarge,
                         )
                     }
-                    Spacer(Modifier.height(14.dp))
-                    Text(formatRecordingTime(elapsed), fontSize = 48.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Normal)
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(16.dp))
+                    Text(formatRecordingTime(elapsed), style = LocalAtlasTextStyles.current.timer)
+                    Spacer(Modifier.height(6.dp))
                     MicrophoneWaveform(recording)
                 }
             }
             Spacer(Modifier.height(18.dp))
-            Text(if (current) health.input else "${options.quality.label} · about ${options.quality.megabytesPerHour} MB/hour", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                if (current) health.input else options?.let { "${it.quality.label} · about ${it.quality.megabytesPerHour} MB/hour" } ?: "Preparing recording settings…",
+                color = MaterialTheme.colorScheme.secondary,
+                style = MaterialTheme.typography.bodyMedium,
+            )
             if (current) Text("Continues with the screen locked", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
             health.warning?.takeIf { current }?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 16.dp)) }
             val failure = (state as? RecordingState.Failed)?.takeIf { it.meetingId == meeting?.id }?.message ?: meeting?.lastError

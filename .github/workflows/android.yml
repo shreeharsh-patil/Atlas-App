@@ -2,25 +2,54 @@ name: Android
 
 on:
   push:
+    branches: [ main ]
   pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
       - uses: android-actions/setup-android@v3
         with:
           packages: platform-tools
       - name: Install Android SDK components
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
       - name: Build app, device tests, and run unit tests
-        run: ./gradlew --no-daemon :app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest
+        run: ./gradlew :app:assembleDebug :app:assembleDebugAndroidTest :app:testDebugUnitTest
       - name: Lint after generated sources are stable
-        run: ./gradlew --no-daemon :app:lintDebug
+        run: ./gradlew :app:lintDebug
+      - name: Lint the release variant
+        run: ./gradlew :app:lintRelease
+      - name: Build the release variant (exercises R8 and resource shrinking)
+        run: ./gradlew :app:assembleRelease -PallowUnsignedRelease=true
       - name: Verify SQLite migration structure and preserved content
         run: python3 tools/check_migrations.py
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reports
+          path: |
+            app/build/reports/lint-results-debug.*
+            app/build/reports/lint-results-release.*
+            app/build/test-results/testDebugUnitTest/*.xml
+      - name: Upload the debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: meeting-atlas-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

@@ -19,7 +19,8 @@ class MeetingProcessingRepository @Inject constructor(private val database: Meet
     fun saveModels(model: String, transcriptionModel: String) = settingsStore.saveModels(model, transcriptionModel)
 
     suspend fun deleteAudioAfterAnalysis(id: String): Boolean {
-        check(AudioWorkCoordinator.startProcessing()) { "Finish the active audio operation before removing audio." }
+        val owner = AudioWorkCoordinator.startProcessing()
+        check(owner != null) { "Finish the active audio operation before removing audio." }
         try {
             val state = database.notesDao().state(id)
             val legacy = database.meetingAnalysisDao().find(id)
@@ -30,9 +31,11 @@ class MeetingProcessingRepository @Inject constructor(private val database: Meet
                 database.meetingDao().clearAudioPath(id, System.currentTimeMillis())
                 database.audioSegmentDao().deleteForMeeting(id)
                 database.meetingAnalysisDao().markAudioDeleted(id, System.currentTimeMillis())
-                state?.let { database.notesDao().saveState(it.copy(audioDeletedAt = System.currentTimeMillis())) }
+                // A targeted update avoids writing a stale copy of the whole notes_state row
+                // over a concurrent pipeline update.
+                state?.let { database.notesDao().markAudioDeleted(id, System.currentTimeMillis()) }
             }
             return true
-        } finally { AudioWorkCoordinator.finishProcessing() }
+        } finally { AudioWorkCoordinator.finishProcessing(owner) }
     }
 }

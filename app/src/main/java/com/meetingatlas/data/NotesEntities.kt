@@ -56,7 +56,7 @@ interface NotesDao {
     @Query("SELECT COUNT(*) FROM source_coverage c JOIN transcript_segments t ON t.id=c.transcriptId WHERE t.meetingId=:id") suspend fun coverageCount(id: String): Int
     @Query("SELECT * FROM transcript_segments WHERE id=:id") suspend fun source(id: String): TranscriptSegmentEntity?
     @Query("SELECT * FROM transcript_segments WHERE meetingId=:id ORDER BY orderIndex LIMIT :limit") fun observeSources(id: String, limit: Int): Flow<List<TranscriptSegmentEntity>>
-    @Query("SELECT * FROM transcript_segments WHERE meetingId=:id AND (:query='' OR text LIKE '%'||:query||'%') ORDER BY orderIndex LIMIT :limit") fun searchSources(id: String, query: String, limit: Int): Flow<List<TranscriptSegmentEntity>>
+    @Query("SELECT * FROM transcript_segments WHERE meetingId=:id AND (:query='' OR text LIKE '%'||:query||'%' ESCAPE '\\') ORDER BY orderIndex LIMIT :limit") fun searchSources(id: String, query: String, limit: Int): Flow<List<TranscriptSegmentEntity>>
     @Query("SELECT t.* FROM transcript_segments t JOIN chapter_sources c ON c.transcriptId=t.id WHERE c.chapterId=:id ORDER BY t.orderIndex") suspend fun chapterTranscript(id: String): List<TranscriptSegmentEntity>
     @Query("SELECT DISTINCT n.* FROM note_entries n JOIN note_revisions r ON r.entryId=n.id AND r.number=n.revision JOIN note_evidence e ON e.revisionId=r.id JOIN chapter_sources c ON c.transcriptId=e.transcriptId WHERE c.chapterId=:id ORDER BY n.updatedAt") suspend fun chapterNotes(id: String): List<NoteEntryEntity>
     @Query("SELECT DISTINCT t.* FROM transcript_segments t JOIN note_evidence e ON e.transcriptId=t.id JOIN note_revisions r ON r.id=e.revisionId JOIN note_entries n ON n.id=r.entryId AND n.revision=r.number WHERE n.topicId=:topicId AND t.orderIndex>:after ORDER BY t.orderIndex LIMIT 64") suspend fun topicSources(topicId: String, after: Int): List<TranscriptSegmentEntity>
@@ -78,6 +78,10 @@ interface NotesDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun chapterSources(values: List<ChapterSourceEntity>)
     @Upsert suspend fun saveState(value: NotesStateEntity)
     @Query("SELECT * FROM notes_state WHERE meetingId=:id") suspend fun state(id: String): NotesStateEntity?
+    /** Targeted update so a concurrent pipeline write is not overwritten by a stale row copy. */
+    @Query("UPDATE notes_state SET audioDeletedAt=:at, updatedAt=:at WHERE meetingId=:id") suspend fun markAudioDeleted(id: String, at: Long)
+    /** Atomic revision bump: two concurrent jobs can never claim the same snapshot number. */
+    @Query("UPDATE notes_state SET revision=revision+1, status=:status, summarizedOrder=:order, updatedAt=:now WHERE meetingId=:meetingId") suspend fun bumpRevision(meetingId: String, status: String, order: Int, now: Long): Int
     @Transaction @Query("SELECT * FROM notes_state WHERE meetingId=:id") fun observeDocument(id: String): Flow<NotesDocument?>
     @Upsert suspend fun saveChunks(values: List<ProcessingChunkEntity>)
     @Query("SELECT * FROM processing_chunks WHERE meetingId=:id AND status!='COMPLETE' ORDER BY position LIMIT 1") suspend fun nextChunk(id: String): ProcessingChunkEntity?
@@ -86,6 +90,7 @@ interface NotesDao {
     @Upsert suspend fun saveJob(value: NotesJobEntity)
     @Query("SELECT * FROM notes_jobs WHERE id=:id") suspend fun job(id: String): NotesJobEntity?
     @Query("SELECT * FROM notes_jobs WHERE meetingId=:id ORDER BY updatedAt DESC") fun jobs(id: String): Flow<List<NotesJobEntity>>
-    @Insert suspend fun snapshot(value: SummarySnapshotEntity)
+    /** A snapshot insert must never abort the surrounding transaction. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE) suspend fun snapshot(value: SummarySnapshotEntity)
     @Query("SELECT * FROM summary_snapshots WHERE meetingId=:id ORDER BY revision DESC LIMIT 100") fun snapshots(id: String): Flow<List<SummarySnapshotEntity>>
 }

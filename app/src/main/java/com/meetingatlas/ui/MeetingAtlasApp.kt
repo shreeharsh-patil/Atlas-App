@@ -1,7 +1,6 @@
 package com.meetingatlas.ui
 
 import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.BackHandler
@@ -11,38 +10,32 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
-import androidx.compose.foundation.selection.selectable
-import androidx.compose.foundation.selection.selectableGroup
-import androidx.compose.ui.semantics.LiveRegionMode
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.stateDescription
-import androidx.compose.ui.draw.rotate
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
-import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -51,23 +44,19 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -80,67 +69,94 @@ import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.repeatOnLifecycle
+import com.meetingatlas.BuildConfig
+import com.meetingatlas.data.BookmarkEntity
 import com.meetingatlas.data.MeetingAnalysisEntity
 import com.meetingatlas.data.MeetingEntity
 import com.meetingatlas.data.RecordingStatus
-import com.meetingatlas.recording.MeetingRecordingService
+import com.meetingatlas.notes.MeetingTemplate
+import com.meetingatlas.recording.AudioQuality
 import com.meetingatlas.recording.RecordingProcessState
 import com.meetingatlas.recording.RecordingState
 import com.meetingatlas.recording.formatRecordingTime
-import com.meetingatlas.recording.AudioQuality
-import com.meetingatlas.data.BookmarkEntity
-import com.meetingatlas.BuildConfig
-import androidx.compose.material3.Switch
+import com.meetingatlas.ui.theme.AtlasTheme
+import com.meetingatlas.ui.theme.LocalAtlasTextStyles
 import java.text.DateFormat
+import java.text.SimpleDateFormat
 import java.util.Date
-import kotlinx.coroutines.delay
+import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
 
 private enum class Destination { HOME, LIBRARY, DETAIL, SETTINGS, RECORDING }
 private enum class DetailTab { SUMMARY, MAP, TRANSCRIPT }
 
+/** Shared separator for meta lines so the spacing is identical everywhere. */
+internal const val META_SEPARATOR = "  ·  "
+
 @Composable
 fun MeetingAtlasApp(viewModel: HomeViewModel = hiltViewModel()) {
     val meetings by viewModel.meetings.collectAsStateWithLifecycle()
     val recordingState by RecordingProcessState.state.collectAsStateWithLifecycle()
     val meetingsReady by viewModel.meetingsReady.collectAsStateWithLifecycle()
-    var destination by rememberSaveable { mutableStateOf(Destination.HOME) }
-    var settingsReturn by rememberSaveable { mutableStateOf(Destination.HOME) }
-    var selectedMeetingId by rememberSaveable { mutableStateOf<String?>(null) }
-    var recordingMeetingId by rememberSaveable { mutableStateOf<String?>(null) }
     val localError by viewModel.localError.collectAsStateWithLifecycle()
+
+    // The navigation state objects are held explicitly so the callbacks below can be
+    // remembered once instead of being rebuilt on every recomposition.
+    val destinationState = rememberSaveable { mutableStateOf(Destination.HOME) }
+    val settingsReturnState = rememberSaveable { mutableStateOf(Destination.HOME) }
+    val detailReturnState = rememberSaveable { mutableStateOf(Destination.HOME) }
+    val selectedMeetingIdState = rememberSaveable { mutableStateOf<String?>(null) }
+    val recordingMeetingIdState = rememberSaveable { mutableStateOf<String?>(null) }
+    var destination by destinationState
+    var settingsReturn by settingsReturnState
+    var detailReturn by detailReturnState
+    var selectedMeetingId by selectedMeetingIdState
+    var recordingMeetingId by recordingMeetingIdState
+
+    // A freshly created meeting is not in the Room list until the invalidation tracker
+    // emits it. Keeping the entity here stops the recording screen showing "New meeting"
+    // and a disabled start button for a few frames.
+    var pendingMeeting by remember { mutableStateOf<MeetingEntity?>(null) }
+
     val activeId = when (val current = recordingState) {
         is RecordingState.Preparing -> current.meetingId
         is RecordingState.Recording -> current.meetingId
@@ -150,25 +166,43 @@ fun MeetingAtlasApp(viewModel: HomeViewModel = hiltViewModel()) {
     }
     val activeSession = activeId?.let { id -> meetings.firstOrNull { it.id == id } }
     val selectedMeeting = selectedMeetingId?.let { id -> meetings.firstOrNull { it.id == id } }
-    var detailReturn by rememberSaveable { mutableStateOf(Destination.HOME) }
-    fun openMeeting(meeting: MeetingEntity) {
-        if (meeting.recordingStatus in setOf(RecordingStatus.PREPARING, RecordingStatus.RECORDING, RecordingStatus.PAUSED)) {
-            recordingMeetingId = meeting.id; destination = Destination.RECORDING
-        } else {
-            // Remember where the meeting was opened from so Back returns there instead of always going home.
-            detailReturn = if (destination == Destination.LIBRARY) Destination.LIBRARY else Destination.HOME
-            selectedMeetingId = meeting.id
-            destination = Destination.DETAIL
+    val recordingMeeting = recordingMeetingId?.let { id -> meetings.firstOrNull { it.id == id } } ?: pendingMeeting
+
+    // Once Room has the row, the local copy is no longer needed.
+    LaunchedEffect(meetings, pendingMeeting) {
+        val pending = pendingMeeting ?: return@LaunchedEffect
+        if (meetings.any { it.id == pending.id }) pendingMeeting = null
+    }
+
+    // `leaveRecording` reads the meeting list and the live session id, both of which change
+    // while the user records, so they are read through `rememberUpdatedState`.
+    val meetingsState = rememberUpdatedState(meetings)
+    val activeIdState = rememberUpdatedState(activeId)
+
+    val openMeeting: (MeetingEntity) -> Unit = remember {
+        { meeting: MeetingEntity ->
+            if (meeting.recordingStatus in setOf(RecordingStatus.PREPARING, RecordingStatus.RECORDING, RecordingStatus.PAUSED)) {
+                recordingMeetingIdState.value = meeting.id
+                destinationState.value = Destination.RECORDING
+            } else {
+                // Remember where the meeting was opened from so Back returns there instead of always going home.
+                detailReturnState.value = if (destinationState.value == Destination.LIBRARY) Destination.LIBRARY else Destination.HOME
+                selectedMeetingIdState.value = meeting.id
+                destinationState.value = Destination.DETAIL
+            }
         }
     }
-    fun leaveRecording(): Destination {
-        val meeting = meetings.firstOrNull { it.id == recordingMeetingId }
-        return if (activeId == null && meeting != null && meeting.recordingStatus in setOf(RecordingStatus.SAVED, RecordingStatus.INTERRUPTED, RecordingStatus.FAILED)) {
-            selectedMeetingId = recordingMeetingId
-            detailReturn = Destination.HOME
-            Destination.DETAIL
-        } else {
-            Destination.HOME
+    val leaveRecording: () -> Destination = remember {
+        {
+            val id = recordingMeetingIdState.value
+            val meeting = id?.let { target -> meetingsState.value.firstOrNull { it.id == target } }
+            if (activeIdState.value == null && meeting != null && meeting.recordingStatus in setOf(RecordingStatus.SAVED, RecordingStatus.INTERRUPTED, RecordingStatus.FAILED)) {
+                selectedMeetingIdState.value = id
+                detailReturnState.value = if (destinationState.value == Destination.LIBRARY) Destination.LIBRARY else Destination.HOME
+                Destination.DETAIL
+            } else {
+                Destination.HOME
+            }
         }
     }
 
@@ -180,76 +214,118 @@ fun MeetingAtlasApp(viewModel: HomeViewModel = hiltViewModel()) {
             else -> Destination.HOME
         }
     }
+
     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-    // Edge-to-edge windows are not resized for the keyboard, so the IME inset has to be consumed here.
-    Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top)).imePadding()) {
-    if (activeSession != null && destination != Destination.RECORDING) ActiveRecordingBar(activeSession.title, recordingState) { recordingMeetingId = activeSession.id; destination = Destination.RECORDING }
-    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
-    Box(Modifier.widthIn(max = 920.dp).fillMaxSize()) {
-    when (destination) {
-        Destination.HOME -> AtlasScaffold(selected = Destination.HOME, onHome = { destination = Destination.HOME }, onLibrary = { destination = Destination.LIBRARY }) {
-            HomeScreen(
-                meetings = meetings,
-                activeSession = activeSession,
-                onLibrary = { destination = Destination.LIBRARY },
-                onSettings = { settingsReturn = Destination.HOME; destination = Destination.SETTINGS },
-                onMeeting = ::openMeeting,
-                onNewRecording = {
-                    if (activeSession != null) {
-                        recordingMeetingId = activeSession.id
-                        destination = Destination.RECORDING
-                    } else viewModel.createMeeting { meeting -> recordingMeetingId = meeting.id; destination = Destination.RECORDING }
-                },
-            )
+        // Edge-to-edge windows are not resized for the keyboard, so the IME inset is consumed
+        // by the content area only - the bottom navigation bar stays anchored to the screen.
+        Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))) {
+            if (activeSession != null && destination != Destination.RECORDING) {
+                ActiveRecordingBar(activeSession.title, recordingState) {
+                    recordingMeetingId = activeSession.id
+                    destination = Destination.RECORDING
+                }
+            }
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
+                Box(Modifier.widthIn(max = 920.dp).fillMaxSize()) {
+                    when (destination) {
+                        Destination.HOME -> AtlasScaffold(
+                            selected = Destination.HOME,
+                            onHome = { destination = Destination.HOME },
+                            onLibrary = { destination = Destination.LIBRARY },
+                        ) {
+                            HomeScreen(
+                                meetings = meetings,
+                                activeSession = activeSession,
+                                onLibrary = { destination = Destination.LIBRARY },
+                                onSettings = { settingsReturn = Destination.HOME; destination = Destination.SETTINGS },
+                                onMeeting = openMeeting,
+                                onNewRecording = {
+                                    if (activeSession != null) {
+                                        recordingMeetingId = activeSession.id
+                                        destination = Destination.RECORDING
+                                    } else {
+                                        viewModel.createMeeting { meeting ->
+                                            pendingMeeting = meeting
+                                            recordingMeetingId = meeting.id
+                                            destination = Destination.RECORDING
+                                        }
+                                    }
+                                },
+                            )
+                        }
+                        Destination.LIBRARY -> AtlasScaffold(
+                            selected = Destination.LIBRARY,
+                            onHome = { destination = Destination.HOME },
+                            onLibrary = { destination = Destination.LIBRARY },
+                        ) {
+                            LibraryScreen(meetings, onBack = { destination = Destination.HOME }, onMeeting = openMeeting)
+                        }
+                        Destination.DETAIL -> {
+                            if (selectedMeeting == null) {
+                                // The meeting was deleted, or Room has not emitted it yet.
+                                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                                LaunchedEffect(meetingsReady, selectedMeetingId) { if (meetingsReady) destination = detailReturn }
+                            } else {
+                                MeetingDetailScreen(
+                                    meeting = selectedMeeting,
+                                    viewModel = viewModel,
+                                    onBack = { destination = detailReturn; viewModel.clearProcessing() },
+                                    onSettings = { settingsReturn = Destination.DETAIL; destination = Destination.SETTINGS },
+                                )
+                            }
+                        }
+                        Destination.SETTINGS -> SettingsScreen(viewModel, onBack = { destination = settingsReturn })
+                        Destination.RECORDING -> RecordingScreenV2(
+                            meeting = recordingMeeting,
+                            viewModel = viewModel,
+                            onBack = { destination = leaveRecording() },
+                            onPermissionDenied = {
+                                recordingMeetingId?.let { viewModel.discardDraft(it) }
+                                pendingMeeting = null
+                                destination = Destination.HOME
+                            },
+                        )
+                    }
+                }
+            }
         }
-        Destination.LIBRARY -> AtlasScaffold(selected = Destination.LIBRARY, onHome = { destination = Destination.HOME }, onLibrary = { destination = Destination.LIBRARY }) {
-            LibraryScreen(meetings, onBack = { destination = Destination.HOME }, onMeeting = ::openMeeting)
-        }
-        Destination.DETAIL -> {
-            if (selectedMeeting == null) {
-                if (!meetingsReady) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                LaunchedEffect(meetingsReady, selectedMeetingId) { if (meetingsReady) destination = detailReturn }
-            } else MeetingDetailScreen(
-                meeting = selectedMeeting,
-                viewModel = viewModel,
-                onBack = { destination = detailReturn; viewModel.clearProcessing() },
-                onSettings = { settingsReturn = Destination.DETAIL; destination = Destination.SETTINGS },
-            )
-        }
-        Destination.SETTINGS -> SettingsScreen(viewModel, onBack = { destination = settingsReturn })
-        Destination.RECORDING -> RecordingScreenV2(
-            meeting = meetings.firstOrNull { it.id == recordingMeetingId },
-            viewModel = viewModel,
-            onBack = { destination = leaveRecording() },
-            onPermissionDenied = { recordingMeetingId?.let { viewModel.discardDraft(it) }; destination = Destination.HOME },
+    }
+
+    if (localError != null) {
+        AlertDialog(
+            onDismissRequest = viewModel::clearLocalError,
+            title = { Text("Could not complete the change") },
+            text = { Text(localError.orEmpty()) },
+            confirmButton = { TextButton(onClick = viewModel::clearLocalError) { Text("OK") } },
         )
     }
-    }
-    }
-    }
-    }
-    if (localError != null) AlertDialog(onDismissRequest = viewModel::clearLocalError, title = { Text("Could not complete the change") }, text = { Text(localError.orEmpty()) }, confirmButton = { TextButton(onClick = viewModel::clearLocalError) { Text("OK") } })
 }
 
 @Composable
 private fun AtlasScaffold(selected: Destination, onHome: () -> Unit, onLibrary: () -> Unit, content: @Composable () -> Unit) {
+    // The bottom bar is hidden while the keyboard is up so it never floats over the IME.
+    val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
-            // NavigationBar keeps its own navigation-bar inset, ripple and accessibility semantics.
-            NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
-                NavigationBarItem(
-                    selected = selected == Destination.HOME,
-                    onClick = onHome,
-                    icon = { Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(20.dp)) },
-                    label = { Text("Meetings") },
-                )
-                NavigationBarItem(
-                    selected = selected == Destination.LIBRARY,
-                    onClick = onLibrary,
-                    icon = { Icon(Icons.AutoMirrored.Filled.LibraryBooks, contentDescription = null, modifier = Modifier.size(20.dp)) },
-                    label = { Text("Library") },
-                )
+            if (!imeVisible) {
+                NavigationBar(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 0.dp,
+                ) {
+                    NavigationBarItem(
+                        selected = selected == Destination.HOME,
+                        onClick = onHome,
+                        icon = { Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                        label = { Text("Meetings") },
+                    )
+                    NavigationBarItem(
+                        selected = selected == Destination.LIBRARY,
+                        onClick = onLibrary,
+                        icon = { Icon(Icons.AutoMirrored.Filled.LibraryBooks, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                        label = { Text("Library") },
+                    )
+                }
             }
         },
     ) { inset -> Box(Modifier.padding(inset)) { content() } }
@@ -264,89 +340,75 @@ private fun HomeScreen(
     onMeeting: (MeetingEntity) -> Unit,
     onNewRecording: () -> Unit,
 ) {
-    val recentMeetings = remember(meetings) { meetings.take(5) }
+    // "Recent" must actually be recent: the DAO sorts pinned rows first.
+    val recentMeetings = remember(meetings) { meetings.sortedByDescending { it.createdAt }.take(5) }
+    val savedCount = remember(meetings) { meetings.count { it.recordingStatus == RecordingStatus.SAVED } }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(start = 22.dp, top = 22.dp, end = 22.dp, bottom = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(0.dp),
+        contentPadding = PaddingValues(start = 20.dp, top = 20.dp, end = 20.dp, bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         item(key = "brand-header") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Image(
-                    painter = painterResource(com.meetingatlas.R.drawable.meeting_atlas_mark),
-                    contentDescription = null,
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier.size(44.dp),
-                )
-                Spacer(Modifier.width(10.dp))
-                Column(Modifier.weight(1f)) {
-                    Text("MEETING ATLAS", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.secondary, letterSpacing = 1.4.sp)
-                    Text("Recordings and meeting notes", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Medium)
-                }
-                IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings", tint = MaterialTheme.colorScheme.secondary) }
-            }
-        }
-        item(key = "home-intro") {
-            Column(Modifier.padding(top = 30.dp)) {
-                Text("Meetings", style = MaterialTheme.typography.headlineLarge, lineHeight = 39.sp, fontWeight = FontWeight.SemiBold, letterSpacing = (-0.6).sp)
-                Spacer(Modifier.height(8.dp))
-                Text("Record a conversation. Keep the decisions and next steps.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.secondary)
-            }
+            AtlasHero(
+                eyebrow = "Meeting Atlas",
+                headline = if (savedCount == 0) "Your meetings" else "$savedCount saved ${if (savedCount == 1) "meeting" else "meetings"}",
+                body = "Record a conversation. Keep the decisions, the evidence and the next steps.",
+                logo = {
+                    Image(
+                        painter = painterResource(com.meetingatlas.R.drawable.meeting_atlas_mark),
+                        contentDescription = null,
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier.size(38.dp),
+                    )
+                },
+                trailing = {
+                    IconButton(onClick = onSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings", tint = AtlasTheme.colors.heroOn)
+                    }
+                },
+            )
         }
         item(key = "record-action") {
             Button(
                 onClick = onNewRecording,
-                modifier = Modifier.fillMaxWidth().padding(top = 22.dp).heightIn(min = 58.dp),
-                shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 60.dp),
+                shape = RoundedCornerShape(20.dp),
             ) {
                 Icon(Icons.Default.Mic, contentDescription = null)
-                Spacer(Modifier.width(9.dp))
-                Text(if (activeSession == null) "Start a recording" else "Return to recording", fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    if (activeSession == null) "Start a recording" else "Return to recording",
+                    style = MaterialTheme.typography.labelLarge,
+                )
             }
         }
         item(key = "recent-heading") {
-            Row(Modifier.padding(top = 28.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.padding(top = 14.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    Text("Recent", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
-                    if (recentMeetings.isNotEmpty()) Text("${meetings.size} ${if (meetings.size == 1) "meeting" else "meetings"} saved", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                    Text("Recent", style = MaterialTheme.typography.titleLarge, modifier = Modifier.semantics { heading() })
+                    if (recentMeetings.isNotEmpty()) {
+                        Text(
+                            "${meetings.size} ${if (meetings.size == 1) "meeting" else "meetings"} in total",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
                 }
                 TextButton(onClick = onLibrary, enabled = meetings.isNotEmpty()) { Text("All meetings") }
             }
         }
         if (recentMeetings.isEmpty()) {
             item(key = "empty-library") {
-                EmptyStateCard(
+                AtlasEmptyState(
                     icon = Icons.Default.Mic,
                     title = "No recordings yet",
                     body = "Start a recording here. Saved audio stays on this device until you choose to create notes.",
-                    modifier = Modifier.padding(top = 10.dp),
+                    modifier = Modifier.padding(top = 6.dp),
                 )
             }
         } else {
             items(recentMeetings, key = { "recent-${it.id}" }) { meeting ->
-                MeetingRow(meeting, onClick = { onMeeting(meeting) }, modifier = Modifier.padding(bottom = 9.dp))
-            }
-        }
-        item(key = "home-bottom-space") { Spacer(Modifier.height(6.dp)) }
-    }
-}
-
-@Composable
-private fun EmptyStateCard(icon: androidx.compose.ui.graphics.vector.ImageVector, title: String, body: String, modifier: Modifier = Modifier) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(18.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
-    ) {
-        Row(Modifier.fillMaxWidth().padding(18.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(46.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape), Alignment.Center) {
-                Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(22.dp))
-            }
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
-                Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary)
+                MeetingRow(meeting, onClick = { onMeeting(meeting) })
             }
         }
     }
@@ -356,20 +418,27 @@ private fun EmptyStateCard(icon: androidx.compose.ui.graphics.vector.ImageVector
 private fun LibraryScreen(meetings: List<MeetingEntity>, onBack: () -> Unit, onMeeting: (MeetingEntity) -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     val focusManager = LocalFocusManager.current
-    val filtered = remember(meetings, query) {
+    val locale = remember { Locale.getDefault() }
+    val filtered = remember(meetings, query, locale) {
         val needle = query.trim()
-        if (needle.isEmpty()) meetings else meetings.filter { it.title.contains(needle, ignoreCase = true) }
+        if (needle.isEmpty()) {
+            meetings
+        } else {
+            val lowered = needle.lowercase(locale)
+            // Lower-casing both sides avoids the Turkish dotless-i mismatch of contains(ignoreCase).
+            meetings.filter { it.title.lowercase(locale).contains(lowered) }
+        }
     }
-    val monthFormat = remember { java.text.SimpleDateFormat("MMMM yyyy", java.util.Locale.getDefault()) }
+    val monthFormat = remember(locale) { SimpleDateFormat("MMMM yyyy", locale) }
     val grouped = remember(filtered, monthFormat) {
         filtered.groupBy { monthFormat.format(Date(it.createdAt)) }
     }
-    Column(Modifier.fillMaxSize().padding(horizontal = 22.dp)) {
-        Spacer(Modifier.height(18.dp))
+    Column(Modifier.fillMaxSize().padding(horizontal = 20.dp)) {
+        Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             Column(Modifier.padding(start = 4.dp)) {
-                Text("Your library", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text("Your library", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.semantics { heading() })
                 Text(
                     if (query.isBlank()) "${meetings.size} ${if (meetings.size == 1) "meeting" else "meetings"}"
                     else "${filtered.size} of ${meetings.size} shown",
@@ -378,7 +447,7 @@ private fun LibraryScreen(meetings: List<MeetingEntity>, onBack: () -> Unit, onM
                 )
             }
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(10.dp))
         if (meetings.isNotEmpty()) {
             OutlinedTextField(
                 value = query,
@@ -392,13 +461,13 @@ private fun LibraryScreen(meetings: List<MeetingEntity>, onBack: () -> Unit, onM
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                 keyboardActions = KeyboardActions(onSearch = { focusManager.clearFocus() }),
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(16.dp),
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(8.dp))
         }
         if (meetings.isEmpty()) {
             Box(Modifier.fillMaxSize().padding(bottom = 40.dp), contentAlignment = Alignment.Center) {
-                EmptyStateCard(
+                AtlasEmptyState(
                     icon = Icons.AutoMirrored.Filled.LibraryBooks,
                     title = "Your library is empty",
                     body = "Saved recordings appear here, newest first. Start one from the Meetings tab.",
@@ -408,19 +477,24 @@ private fun LibraryScreen(meetings: List<MeetingEntity>, onBack: () -> Unit, onM
             Box(Modifier.fillMaxSize().padding(bottom = 40.dp), contentAlignment = Alignment.Center) {
                 Text("No meetings match “${query.trim()}”.", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.secondary)
             }
-        } else LazyColumn(contentPadding = PaddingValues(bottom = 18.dp), verticalArrangement = Arrangement.spacedBy(9.dp)) {
-            grouped.forEach { (month, monthMeetings) ->
-                item(key = "month-$month") {
-                    Text(
-                        month,
-                        modifier = Modifier.padding(top = 10.dp, bottom = 2.dp, start = 2.dp),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.secondary,
-                        letterSpacing = 0.8.sp,
-                    )
-                }
-                items(monthMeetings, key = { it.id }) { meeting ->
-                    MeetingRow(meeting, onClick = { onMeeting(meeting) })
+        } else {
+            LazyColumn(
+                Modifier.weight(1f),
+                contentPadding = PaddingValues(bottom = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(9.dp),
+            ) {
+                grouped.forEach { (month, monthMeetings) ->
+                    item(key = "month-$month") {
+                        Text(
+                            month,
+                            modifier = Modifier.padding(top = 10.dp, bottom = 2.dp, start = 2.dp).semantics { heading() },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.secondary,
+                        )
+                    }
+                    items(monthMeetings, key = { it.id }) { meeting ->
+                        MeetingRow(meeting, onClick = { onMeeting(meeting) })
+                    }
                 }
             }
         }
@@ -432,49 +506,66 @@ private fun MeetingRow(meeting: MeetingEntity, onClick: () -> Unit, modifier: Mo
     val createdLabel = remember(meeting.createdAt) {
         DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(meeting.createdAt))
     }
-    val isActive = meeting.recordingStatus in setOf(RecordingStatus.PREPARING, RecordingStatus.RECORDING, RecordingStatus.PAUSED)
+    // A draft that was never started is not actually "preparing"; label and colour it honestly.
+    val isDraft = meeting.recordingStatus == RecordingStatus.PREPARING && meeting.startedAt == null
+    val isActive = !isDraft && meeting.recordingStatus in setOf(RecordingStatus.PREPARING, RecordingStatus.RECORDING, RecordingStatus.PAUSED)
     // A "Saved" chip on every row is noise; only surface a status that needs attention.
     val statusChip = meeting.recordingStatus.takeIf { it != RecordingStatus.SAVED }
     val needsAttention = meeting.recordingStatus == RecordingStatus.FAILED || meeting.recordingStatus == RecordingStatus.INTERRUPTED
-    // A draft that was never started is not actually "preparing"; label it honestly.
-    val statusText = if (meeting.recordingStatus == RecordingStatus.PREPARING && meeting.startedAt == null) "Draft" else statusLabel(meeting.recordingStatus)
-    Surface(
-        // Merge the row's texts so a screen reader announces it as one button.
-        modifier = modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onClick).semantics(mergeDescendants = true) {},
-        color = MaterialTheme.colorScheme.surface,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+    val statusText = if (isDraft) "Draft" else statusLabel(meeting.recordingStatus)
+
+    AtlasClickableCard(
+        onClick = onClick,
+        modifier = modifier,
+        onClickLabel = "Open meeting",
     ) {
-        Row(Modifier.padding(horizontal = 15.dp, vertical = 14.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(40.dp).background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)), Alignment.Center) {
-                Icon(Icons.Default.Mic, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(19.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(42.dp)
+                    .background(
+                        if (isActive) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                        RoundedCornerShape(13.dp),
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.Mic,
+                    contentDescription = null,
+                    tint = if (isActive) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(13.dp))
             Column(Modifier.weight(1f)) {
-                Text(meeting.title, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                Text(
+                    meeting.title,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    style = MaterialTheme.typography.titleMedium,
+                )
                 Spacer(Modifier.height(3.dp))
-                Text(meetingMetaLabel(createdLabel, meeting.durationMs), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                Text(
+                    meetingMetaLabel(createdLabel, meeting.durationMs),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.secondary,
+                )
             }
             statusChip?.let {
-                Surface(
-                    color = when {
+                Spacer(Modifier.width(8.dp))
+                AtlasPill(
+                    text = statusText,
+                    container = when {
                         isActive -> MaterialTheme.colorScheme.primaryContainer
                         needsAttention -> MaterialTheme.colorScheme.errorContainer
                         else -> MaterialTheme.colorScheme.surfaceVariant
                     },
-                    shape = CircleShape,
-                ) {
-                    Text(
-                        statusText,
-                        modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = when {
-                            isActive -> MaterialTheme.colorScheme.onPrimaryContainer
-                            needsAttention -> MaterialTheme.colorScheme.onErrorContainer
-                            else -> MaterialTheme.colorScheme.secondary
-                        },
-                    )
-                }
+                    content = when {
+                        isActive -> MaterialTheme.colorScheme.onPrimaryContainer
+                        needsAttention -> MaterialTheme.colorScheme.onErrorContainer
+                        else -> MaterialTheme.colorScheme.secondary
+                    },
+                )
             }
         }
     }
@@ -489,26 +580,40 @@ private fun MeetingDetailScreen(
 ) {
     val analysis by remember(meeting.id) { viewModel.observeAnalysis(meeting.id) }.collectAsStateWithLifecycle(initialValue = null)
     val notes by remember(meeting.id) { viewModel.observeNotes(meeting.id) }.collectAsStateWithLifecycle(initialValue = null)
-    var previousNotes by rememberSaveable(meeting.id) { mutableStateOf(false) }
+    // "Previous notes" is a transient mode, not a destination: it must not survive process death.
+    var previousNotes by remember(meeting.id) { mutableStateOf(false) }
     BackHandler(previousNotes) { previousNotes = false }
-    if (notes != null && !previousNotes) {
-        NotesScreen(meeting, notes!!, viewModel, onBack, onSettings, onPreviousNotes = if (analysis != null) ({ previousNotes = true }) else null)
+    val currentNotes = notes
+    if (currentNotes != null && !previousNotes) {
+        NotesScreen(
+            meeting = meeting,
+            document = currentNotes,
+            viewModel = viewModel,
+            onBack = onBack,
+            onSettings = onSettings,
+            onPreviousNotes = if (analysis != null) ({ previousNotes = true }) else null,
+        )
         return
     }
+    val currentAnalysis = analysis
     val segments by remember(meeting.id) { viewModel.observeSegments(meeting.id) }.collectAsStateWithLifecycle(initialValue = emptyList())
     val bookmarks by remember(meeting.id) { viewModel.observeBookmarks(meeting.id) }.collectAsStateWithLifecycle(initialValue = emptyList())
     val options by viewModel.recordingOptions.collectAsStateWithLifecycle()
     var seekRequest by remember(meeting.id) { mutableStateOf<PlaybackSeek?>(null) }
-    var editingBookmark by remember { mutableStateOf<BookmarkEntity?>(null) }
-    var bookmarkLabel by rememberSaveable { mutableStateOf("") }
+    // Keyed by meeting: an un-dismissed dialog must never write to another meeting's bookmark.
+    var editingBookmark by remember(meeting.id) { mutableStateOf<BookmarkEntity?>(null) }
+    var bookmarkLabel by rememberSaveable(meeting.id) { mutableStateOf("") }
     var diagnostics by rememberSaveable { mutableStateOf(false) }
     var confirmDelete by rememberSaveable { mutableStateOf(false) }
     val capturing by com.meetingatlas.recording.AudioWorkCoordinator.recording.collectAsStateWithLifecycle()
-    if (diagnostics && BuildConfig.DEBUG) { RecordingDiagnostics(meeting.id, viewModel) { diagnostics = false }; return }
+    if (diagnostics && BuildConfig.DEBUG) {
+        RecordingDiagnostics(meeting.id, viewModel) { diagnostics = false }
+        return
+    }
     val processing by viewModel.processing.collectAsStateWithLifecycle()
     var selectedTab by rememberSaveable(meeting.id) { mutableStateOf(DetailTab.SUMMARY) }
     var showUploadDialog by rememberSaveable(meeting.id) { mutableStateOf(false) }
-    var template by rememberSaveable(meeting.id) { mutableStateOf(com.meetingatlas.notes.MeetingTemplate.GENERAL) }
+    var template by rememberSaveable(meeting.id) { mutableStateOf(MeetingTemplate.GENERAL) }
     var waitForCharging by rememberSaveable(meeting.id) { mutableStateOf(false) }
     var showRenameDialog by rememberSaveable(meeting.id) { mutableStateOf(false) }
     var titleDraft by rememberSaveable(meeting.id) { mutableStateOf(meeting.title) }
@@ -518,47 +623,75 @@ private fun MeetingDetailScreen(
     val playerReady = remember(segments) { playableSegments(segments).isNotEmpty() }
 
     Column(
-        Modifier.fillMaxSize()
+        Modifier
+            .fillMaxSize()
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 22.dp),
+            .padding(horizontal = 20.dp),
     ) {
-        Spacer(Modifier.height(14.dp))
+        Spacer(Modifier.height(12.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
             Column(Modifier.weight(1f).padding(start = 4.dp)) {
-                Text("MEETING", style = MaterialTheme.typography.labelSmall, letterSpacing = 1.2.sp, color = MaterialTheme.colorScheme.secondary)
-                Text(meeting.title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                AtlasEyebrow("Meeting")
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    meeting.title,
+                    style = MaterialTheme.typography.headlineSmall,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-            IconButton(onClick = { titleDraft = meeting.title; showRenameDialog = true }) { Icon(Icons.Default.Edit, contentDescription = "Rename meeting", tint = MaterialTheme.colorScheme.secondary) }
+            IconButton(onClick = { titleDraft = meeting.title; showRenameDialog = true }) {
+                Icon(Icons.Default.Edit, contentDescription = "Rename meeting", tint = MaterialTheme.colorScheme.secondary)
+            }
         }
         Text(
             remember(meeting.createdAt, meeting.durationMs) {
-                "${DateFormat.getDateInstance(DateFormat.FULL).format(Date(meeting.createdAt))}  ·  ${formatMeetingDuration(meeting.durationMs)}"
+                "${DateFormat.getDateInstance(DateFormat.FULL).format(Date(meeting.createdAt))}$META_SEPARATOR${formatMeetingDuration(meeting.durationMs)}"
             },
-            modifier = Modifier.padding(start = 16.dp, top = 1.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.padding(start = 16.dp, top = 2.dp),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.secondary,
         )
-        Spacer(Modifier.height(18.dp))
-        if (previousNotes) TextButton(onClick = { previousNotes = false }) { Text("Return to current source-linked notes") }
+        Spacer(Modifier.height(16.dp))
+        if (previousNotes) {
+            FilledTonalNotice("You are viewing the previous saved notes.") { previousNotes = false }
+            Spacer(Modifier.height(12.dp))
+        }
 
-        meeting.lastError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall); Spacer(Modifier.height(12.dp)) }
+        meeting.lastError?.let {
+            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.height(12.dp))
+        }
         MeetingPlayer(meeting, segments, viewModel, seekRequest) { seekRequest = null }
         if (playerReady) Spacer(Modifier.height(12.dp))
         if (bookmarks.isNotEmpty()) {
-            ContentCard("Bookmarks") {
+            AtlasCard {
+                Text("Bookmarks", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
+                Spacer(Modifier.height(10.dp))
                 bookmarks.forEach { bookmark ->
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        if (playerReady) TextButton(onClick = { seekRequest = PlaybackSeek(bookmark.elapsedMs) }) { Text(formatRecordingTime(bookmark.elapsedMs)) }
-                        else Text(formatRecordingTime(bookmark.elapsedMs), style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(end = 12.dp))
-                        Text(bookmark.label.ifBlank { "Bookmarked moment" }, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                        IconButton(onClick = { editingBookmark = bookmark; bookmarkLabel = bookmark.label }) { Icon(Icons.Default.Edit, "Edit bookmark label") }
+                        if (playerReady) {
+                            TextButton(onClick = { seekRequest = PlaybackSeek(bookmark.elapsedMs) }) { Text(formatRecordingTime(bookmark.elapsedMs)) }
+                        } else {
+                            Text(formatRecordingTime(bookmark.elapsedMs), style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(end = 12.dp))
+                        }
+                        Text(
+                            bookmark.label.ifBlank { "Bookmarked moment" },
+                            modifier = Modifier.weight(1f),
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                        IconButton(onClick = { editingBookmark = bookmark; bookmarkLabel = bookmark.label; viewModel.clearLocalError() }) {
+                            Icon(Icons.Default.Edit, "Edit bookmark label")
+                        }
                     }
                 }
             }
             Spacer(Modifier.height(12.dp))
         }
 
-        if (analysis == null) {
+        if (currentAnalysis == null) {
             ProcessingSetupCard(
                 hasAudio = meeting.audioPath != null && meeting.recordingStatus in setOf(RecordingStatus.SAVED, RecordingStatus.INTERRUPTED),
                 hasKey = hasKey,
@@ -570,85 +703,190 @@ private fun MeetingDetailScreen(
                 },
             )
         } else {
-            if (notes == null) {
+            if (currentNotes == null) {
                 OutlinedButton(onClick = { showUploadDialog = true }, modifier = Modifier.fillMaxWidth()) { Text("Create detailed notes with sources") }
                 Spacer(Modifier.height(12.dp))
             }
-            AudioLifecycleNote(analysis!!, meeting.audioPath != null)
+            AudioLifecycleNote(currentAnalysis, meeting.audioPath != null)
             if (thisProcessing && processing.error != null) {
                 Spacer(Modifier.height(8.dp))
-                Text(processing.error!!, modifier = Modifier.padding(horizontal = 3.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                Text(processing.error.orEmpty(), modifier = Modifier.padding(horizontal = 3.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
             Spacer(Modifier.height(16.dp))
             Row(
-                Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(12.dp)).padding(4.dp).selectableGroup(),
+                Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(14.dp))
+                    .padding(4.dp)
+                    .selectableGroup(),
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 DetailTab.entries.forEach { tab ->
-                    val label = when (tab) { DetailTab.SUMMARY -> "Summary"; DetailTab.MAP -> "Mind map"; DetailTab.TRANSCRIPT -> "Transcript" }
+                    val label = when (tab) {
+                        DetailTab.SUMMARY -> "Summary"
+                        DetailTab.MAP -> "Mind map"
+                        DetailTab.TRANSCRIPT -> "Transcript"
+                    }
                     val selected = selectedTab == tab
                     Box(
-                        Modifier.weight(1f)
-                            .background(if (selected) MaterialTheme.colorScheme.surface else Color.Transparent, RoundedCornerShape(9.dp))
+                        Modifier
+                            .weight(1f)
+                            .background(
+                                if (selected) MaterialTheme.colorScheme.surface else androidx.compose.ui.graphics.Color.Transparent,
+                                RoundedCornerShape(11.dp),
+                            )
                             .selectable(selected = selected, role = Role.Tab, onClick = { selectedTab = tab })
-                            .heightIn(min = 40.dp).padding(vertical = 10.dp),
+                            .heightIn(min = 48.dp)
+                            .padding(vertical = 12.dp),
                         contentAlignment = Alignment.Center,
                     ) {
-                        Text(label, color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.labelMedium, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal)
+                        Text(
+                            label,
+                            color = if (selected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.secondary,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                        )
                     }
                 }
             }
             Spacer(Modifier.height(14.dp))
             when (selectedTab) {
-                DetailTab.SUMMARY -> SummaryContent(analysis!!)
-                DetailTab.MAP -> MindMapContent(analysis!!.mindMapJson)
-                DetailTab.TRANSCRIPT -> if (analysis!!.transcript.isNotBlank()) TranscriptContent(analysis!!.transcript) else ContentCard("Transcript") {
-                    MutedText("No transcript text was saved for this meeting. Create notes from the source audio to add one.")
+                DetailTab.SUMMARY -> SummaryContent(currentAnalysis)
+                DetailTab.MAP -> MindMapContent(currentAnalysis.mindMapJson)
+                DetailTab.TRANSCRIPT -> if (currentAnalysis.transcript.isNotBlank()) {
+                    TranscriptContent(currentAnalysis.transcript)
+                } else {
+                    AtlasCard(title = "Transcript") {
+                        MutedText("No transcript text was saved for this meeting. Create notes from the source audio to add one.")
+                    }
                 }
             }
-            if (analysis!!.audioDeletedAt == null && meeting.audioPath != null) {
+            if (currentAnalysis.audioDeletedAt == null && meeting.audioPath != null) {
                 Spacer(Modifier.height(10.dp))
-                OutlinedButton(onClick = { viewModel.removeAudioAfterAnalysis(meeting.id) }, enabled = !processing.running, modifier = Modifier.fillMaxWidth()) {
-                    if (processing.running && thisProcessing) CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp) else Icon(Icons.Default.Close, contentDescription = null)
-                    Spacer(Modifier.width(8.dp)); Text("Remove source audio")
+                OutlinedButton(
+                    onClick = { viewModel.removeAudioAfterAnalysis(meeting.id) },
+                    enabled = !processing.running,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    if (processing.running && thisProcessing) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.Close, contentDescription = null)
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text("Remove source audio")
                 }
             }
         }
         Spacer(Modifier.height(22.dp))
         if (BuildConfig.DEBUG) TextButton(onClick = { diagnostics = true }) { Text("Recording diagnostics") }
-        TextButton(onClick = { confirmDelete = true }, enabled = capturing == null && !processing.running) { Text("Delete meeting", color = MaterialTheme.colorScheme.error) }
+        TextButton(onClick = { confirmDelete = true }, enabled = capturing == null && !processing.running) {
+            Text("Delete meeting", color = MaterialTheme.colorScheme.error)
+        }
     }
 
-    if (editingBookmark != null) AlertDialog(onDismissRequest = { editingBookmark = null }, title = { Text("Bookmark label") }, text = { OutlinedTextField(value = bookmarkLabel, onValueChange = { bookmarkLabel = it.take(160) }, label = { Text("Optional label") }) }, confirmButton = { TextButton(onClick = { editingBookmark?.let { viewModel.labelBookmark(it.id, bookmarkLabel) }; editingBookmark = null }) { Text("Save") } }, dismissButton = { TextButton(onClick = { editingBookmark?.let { viewModel.deleteBookmark(it.id) }; editingBookmark = null }) { Text("Delete bookmark") } })
-    if (confirmDelete) AlertDialog(onDismissRequest = { confirmDelete = false }, title = { Text("Delete this meeting?") }, text = { Text("This removes its local recordings, notes, transcript and bookmarks. This cannot be undone.") }, confirmButton = { TextButton(onClick = { confirmDelete = false; viewModel.deleteMeeting(meeting.id, onBack) }) { Text("Delete meeting", color = MaterialTheme.colorScheme.error) } }, dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } })
+    if (editingBookmark != null) {
+        AlertDialog(
+            onDismissRequest = { editingBookmark = null },
+            title = { Text("Bookmark label") },
+            text = { OutlinedTextField(value = bookmarkLabel, onValueChange = { bookmarkLabel = it.take(160) }, label = { Text("Optional label") }) },
+            confirmButton = {
+                TextButton(onClick = {
+                    editingBookmark?.let { viewModel.labelBookmark(it.id, bookmarkLabel) }
+                    editingBookmark = null
+                }) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    editingBookmark?.let { viewModel.deleteBookmark(it.id) }
+                    editingBookmark = null
+                }) { Text("Delete bookmark") }
+            },
+        )
+    }
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            title = { Text("Delete this meeting?") },
+            text = { Text("This removes its local recordings, notes, transcript and bookmarks. This cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = { confirmDelete = false; viewModel.deleteMeeting(meeting.id, onBack) }) {
+                    Text("Delete meeting", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Cancel") } },
+        )
+    }
 
-    if (showUploadDialog) AlertDialog(
-        onDismissRequest = { showUploadDialog = false },
-        title = { Text("Create source-linked notes?") },
-        text = { Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("${if (analysis?.transcript?.isNotBlank() == true) "Your saved transcript" else "Saved audio for transcription and transcript windows"} will be sent to OpenRouter. Transcription may cost money; the text model is free by default. ${if (options.deleteAfterNotes) "Audio is deleted only after complete notes are saved." else "Source audio will be kept."}")
-            MeetingTemplatePicker(template) { template = it }
-            Row(verticalAlignment = Alignment.CenterVertically) { Text("Wait until charging", modifier = Modifier.weight(1f)); Switch(checked = waitForCharging, onCheckedChange = { waitForCharging = it }) }
-        } },
-        confirmButton = {
-            TextButton(onClick = { showUploadDialog = false; viewModel.queueNotes(meeting.id, template, waitForCharging) }) { Text(if (waitForCharging) "Queue notes" else "Process now") }
-        },
-        dismissButton = { TextButton(onClick = { showUploadDialog = false }) { Text("Cancel") } },
-    )
-    if (showRenameDialog) AlertDialog(
-        onDismissRequest = { showRenameDialog = false },
-        title = { Text("Name this meeting") },
-        text = { OutlinedTextField(value = titleDraft, onValueChange = { titleDraft = it.take(120) }, singleLine = true, label = { Text("Meeting title") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text)) },
-        confirmButton = { TextButton(onClick = { viewModel.rename(meeting.id, titleDraft); showRenameDialog = false }, enabled = titleDraft.isNotBlank()) { Text("Save") } },
-        dismissButton = { TextButton(onClick = { showRenameDialog = false }) { Text("Cancel") } },
-    )
+    if (showUploadDialog) {
+        AlertDialog(
+            onDismissRequest = { showUploadDialog = false },
+            title = { Text("Create source-linked notes?") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        "${if (currentAnalysis?.transcript?.isNotBlank() == true) "Your saved transcript" else "Saved audio for transcription and transcript windows"} will be sent to OpenRouter. Transcription may cost money; the text model is free by default. ${if (options?.deleteAfterNotes != false) "Audio is deleted only after complete notes are saved." else "Source audio will be kept."}",
+                    )
+                    MeetingTemplatePicker(template) { template = it }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("Wait until charging", modifier = Modifier.weight(1f))
+                        Switch(checked = waitForCharging, onCheckedChange = { waitForCharging = it })
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showUploadDialog = false; viewModel.queueNotes(meeting.id, template, waitForCharging) }) {
+                    Text(if (waitForCharging) "Queue notes" else "Process now")
+                }
+            },
+            dismissButton = { TextButton(onClick = { showUploadDialog = false }) { Text("Cancel") } },
+        )
+    }
+    if (showRenameDialog) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text("Name this meeting") },
+            text = {
+                OutlinedTextField(
+                    value = titleDraft,
+                    onValueChange = { titleDraft = it.take(120) },
+                    singleLine = true,
+                    label = { Text("Meeting title") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
+                )
+            },
+            confirmButton = { TextButton(onClick = { viewModel.rename(meeting.id, titleDraft); showRenameDialog = false }, enabled = titleDraft.isNotBlank()) { Text("Save") } },
+            dismissButton = { TextButton(onClick = { showRenameDialog = false }) { Text("Cancel") } },
+        )
+    }
+}
+
+@Composable
+private fun FilledTonalNotice(text: String, onDismiss: () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(text, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onTertiaryContainer)
+            TextButton(onClick = onDismiss) { Text("Back to current notes") }
+        }
+    }
 }
 
 @Composable
 private fun ProcessingSetupCard(hasAudio: Boolean, hasKey: Boolean, running: Boolean, progress: String?, error: String?, onGenerate: () -> Unit) {
-    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline), shape = RoundedCornerShape(18.dp)) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, AtlasTheme.colors.cardBorder),
+        shape = RoundedCornerShape(20.dp),
+    ) {
         Column(Modifier.fillMaxWidth().padding(18.dp)) {
-            Text("Meeting notes", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("Meeting notes", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                AtlasGeneratedBadge()
+            }
             Spacer(Modifier.height(6.dp))
             Text(
                 when {
@@ -657,7 +895,8 @@ private fun ProcessingSetupCard(hasAudio: Boolean, hasKey: Boolean, running: Boo
                     !hasKey -> "Add an OpenRouter key in Settings to create a summary and mind map."
                     else -> "Create a transcript, a concise summary, decisions, next steps, and a mind map."
                 },
-                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.secondary,
             )
             if (running) {
                 Spacer(Modifier.height(14.dp))
@@ -668,9 +907,17 @@ private fun ProcessingSetupCard(hasAudio: Boolean, hasKey: Boolean, running: Boo
                 Text(error, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
             }
             Spacer(Modifier.height(16.dp))
-            Button(onClick = onGenerate, enabled = hasAudio && !running, modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(13.dp)) {
-                if (running) CircularProgressIndicator(Modifier.size(18.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
-                else Text(if (hasKey) "Create summary & mind map" else "Set up OpenRouter")
+            Button(
+                onClick = onGenerate,
+                enabled = hasAudio && !running,
+                modifier = Modifier.fillMaxWidth().height(54.dp),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                if (running) {
+                    CircularProgressIndicator(Modifier.size(18.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 2.dp)
+                } else {
+                    Text(if (hasKey) "Create summary & mind map" else "Set up OpenRouter")
+                }
             }
             if (hasAudio && hasKey && !running) {
                 Spacer(Modifier.height(9.dp))
@@ -683,38 +930,63 @@ private fun ProcessingSetupCard(hasAudio: Boolean, hasKey: Boolean, running: Boo
 @Composable
 private fun AudioLifecycleNote(analysis: MeetingAnalysisEntity, audioStillPresent: Boolean) {
     val removed = analysis.audioDeletedAt != null || !audioStillPresent
-    Surface(color = if (removed) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(12.dp)) {
-        Row(Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(if (removed) Icons.Default.Check else Icons.Default.Mic, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(17.dp))
-            Spacer(Modifier.width(9.dp))
-            Text(if (removed) "Source audio removed. Notes are stored on this device." else "Notes saved. Source audio remains on this device.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+    Surface(color = if (removed) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(14.dp)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+                if (removed) Icons.Default.Check else Icons.Default.Mic,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(Modifier.width(10.dp))
+            Text(
+                if (removed) "Source audio removed. Notes are stored on this device." else "Notes saved. Source audio remains on this device.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
         }
     }
 }
 
 @Composable
 private fun SummaryContent(analysis: MeetingAnalysisEntity) {
+    // Parsing JSON on every recomposition is wasteful; memoise it on the raw payload.
+    val keyPoints = remember(analysis.keyPointsJson) { readStringArray(analysis.keyPointsJson) }
+    val decisions = remember(analysis.decisionsJson) { readStringArray(analysis.decisionsJson) }
+    val actions = remember(analysis.actionItemsJson) { readActionItems(analysis.actionItemsJson) }
+    val summary = analysis.summary.trim()
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        ContentCard("Summary") {
-            val summary = analysis.summary.trim()
-            if (summary.isEmpty()) MutedText("No summary text was saved for this meeting.")
-            else SelectionContainer { Text(summary, style = MaterialTheme.typography.bodyLarge, lineHeight = 25.sp) }
+        AtlasCard(title = "Summary") {
+            if (summary.isEmpty()) {
+                MutedText("No summary text was saved for this meeting.")
+            } else {
+                SelectionContainer { Text(summary, style = MaterialTheme.typography.bodyLarge) }
+            }
         }
-        val keyPoints = readStringArray(analysis.keyPointsJson)
-        if (keyPoints.isNotEmpty()) ContentCard("Key points") { keyPoints.forEach { BulletText(it) } }
-        val decisions = readStringArray(analysis.decisionsJson)
-        ContentCard("Decisions") {
-            if (decisions.isEmpty()) MutedText("No explicit decisions were identified.") else decisions.forEach { BulletText(it) }
+        if (keyPoints.isNotEmpty()) {
+            AtlasCard(title = "Key points") { keyPoints.forEach { BulletText(it) } }
         }
-        val actions = readActionItems(analysis.actionItemsJson)
-        ContentCard("Next steps") {
-            if (actions.isEmpty()) MutedText("No assigned actions were identified.") else actions.forEachIndexed { index, action ->
-                if (index > 0) HorizontalDivider(Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outline)
-                Text(action.optString("task"), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-                val owner = action.optString("owner").takeIf(String::isNotBlank)
-                val deadline = action.optString("deadline").takeIf(String::isNotBlank)
-                val metadata = listOfNotNull(owner?.let { "Owner: $it" }, deadline?.let { "Due: $it" }).joinToString("  ·  ")
-                if (metadata.isNotBlank()) Text(metadata, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+        AtlasCard(title = "Decisions") {
+            if (decisions.isEmpty()) {
+                MutedText("No explicit decisions were identified.")
+            } else {
+                decisions.forEach { BulletText(it) }
+            }
+        }
+        AtlasCard(title = "Next steps") {
+            if (actions.isEmpty()) {
+                MutedText("No assigned actions were identified.")
+            } else {
+                actions.forEachIndexed { index, action ->
+                    if (index > 0) HorizontalDivider(Modifier.padding(vertical = 10.dp), color = MaterialTheme.colorScheme.outline)
+                    Text(action.optString("task"), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                    val owner = action.optString("owner").takeIf(String::isNotBlank)
+                    val deadline = action.optString("deadline").takeIf(String::isNotBlank)
+                    val metadata = listOfNotNull(owner?.let { "Owner: $it" }, deadline?.let { "Due: $it" }).joinToString(META_SEPARATOR)
+                    if (metadata.isNotBlank()) {
+                        Text(metadata, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                    }
+                }
             }
         }
     }
@@ -726,8 +998,13 @@ private fun MindMapContent(raw: String) {
     val branches = map?.optJSONArray("branches") ?: JSONArray()
     var expanded by remember(raw) { mutableStateOf((0 until minOf(branches.length(), 4)).toSet()) }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(16.dp)) {
-            Text(map?.optString("label").orEmpty().ifBlank { "Meeting" }, modifier = Modifier.fillMaxWidth().padding(17.dp), color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+        Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(18.dp)) {
+            Text(
+                map?.optString("label").orEmpty().ifBlank { "Meeting" },
+                modifier = Modifier.fillMaxWidth().padding(18.dp),
+                color = MaterialTheme.colorScheme.onPrimary,
+                style = MaterialTheme.typography.titleMedium,
+            )
         }
         if (branches.length() == 0) MutedText("No map branches were returned.")
         if (branches.length() > 1) {
@@ -739,18 +1016,24 @@ private fun MindMapContent(raw: String) {
         for (index in 0 until branches.length()) {
             val branch = branches.optJSONObject(index) ?: continue
             val isExpanded = index in expanded
-            Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(15.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) {
-                Column(Modifier.fillMaxWidth().clickable {
-                    expanded = if (isExpanded) expanded - index else expanded + index
-                }.semantics { stateDescription = if (isExpanded) "Expanded" else "Collapsed" }
-                    .padding(horizontal = 15.dp, vertical = 13.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+            Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(17.dp), border = BorderStroke(1.dp, AtlasTheme.colors.cardBorder)) {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                expanded = if (isExpanded) expanded - index else expanded + index
+                            }
+                            .semantics { stateDescription = if (isExpanded) "Expanded" else "Collapsed" },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         Box(Modifier.size(8.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
                         Spacer(Modifier.width(11.dp))
-                        Text(branch.optString("label"), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+                        Text(branch.optString("label"), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
                         Icon(
                             Icons.Default.ExpandMore,
-                            contentDescription = if (isExpanded) "Collapse branch" else "Expand branch",
+                            // The row already announces its expanded state; a second label would duplicate it.
+                            contentDescription = null,
                             tint = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.rotate(if (isExpanded) 180f else 0f),
                         )
@@ -780,28 +1063,27 @@ private fun MindMapContent(raw: String) {
 
 @Composable
 private fun TranscriptContent(transcript: String) {
-    ContentCard("Transcript") {
-        SelectionContainer { Text(transcript, style = MaterialTheme.typography.bodyMedium, lineHeight = 23.sp) }
+    AtlasCard(title = "Transcript") {
+        SelectionContainer { Text(transcript, style = MaterialTheme.typography.bodyMedium) }
     }
 }
 
+/** A titled content card. The content is a [ColumnScope] so children can use `align`. */
 @Composable
-private fun ContentCard(title: String, content: @Composable () -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(16.dp), border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) {
-        Column(Modifier.fillMaxWidth().padding(16.dp)) {
-            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.height(10.dp))
-            content()
-        }
+private fun ContentCard(title: String, content: @Composable ColumnScope.() -> Unit) {
+    AtlasCard {
+        Text(title, style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.height(10.dp))
+        content()
     }
 }
 
 @Composable
 private fun BulletText(text: String) {
     Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.Top) {
-        Box(Modifier.padding(top = 7.dp).size(6.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
+        Box(Modifier.padding(top = 8.dp).size(6.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
         Spacer(Modifier.width(10.dp))
-        Text(text, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, lineHeight = 22.sp)
+        Text(text, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
     }
 }
 
@@ -818,64 +1100,110 @@ private fun SettingsScreen(viewModel: HomeViewModel, onBack: () -> Unit) {
     val savedSettings = remember { viewModel.openRouterSettings() }
     // The key field must never enter saved instance state, where the plaintext token would be written to the activity bundle.
     var apiKey by remember { mutableStateOf("") }
-    var showKey by remember { mutableStateOf(false) }
+    var showKey by rememberSaveable { mutableStateOf(false) }
     var model by rememberSaveable { mutableStateOf(savedSettings.model) }
     var transcriptionModel by rememberSaveable { mutableStateOf(savedSettings.transcriptionModel) }
     val hasSavedKey by viewModel.hasOpenRouterKey.collectAsStateWithLifecycle()
     val message by viewModel.settingsMessage.collectAsStateWithLifecycle()
     val messageIsError by viewModel.settingsMessageIsError.collectAsStateWithLifecycle()
-    DisposableEffect(Unit) { onDispose { viewModel.clearSettingsMessage() } }
     val modelsValid = model.isNotBlank() && transcriptionModel.isNotBlank()
     Column(
-        Modifier.fillMaxSize()
+        Modifier
+            .fillMaxSize()
             .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal))
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 22.dp),
+            .padding(horizontal = 20.dp),
     ) {
-        Spacer(Modifier.height(18.dp))
+        Spacer(Modifier.height(16.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
-            Text("Settings", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+            Text("Settings", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.semantics { heading() })
         }
         Spacer(Modifier.height(14.dp))
-        ContentCard("Recording") {
+        AtlasCard(title = "Recording") {
             Text("Quality applies to your next recording. Storage estimates exclude container overhead.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
-            AudioQuality.entries.forEach { quality ->
-                Row(Modifier.fillMaxWidth().selectable(selected = quality == options.quality, role = Role.RadioButton, onClick = { viewModel.setQuality(quality) }).heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically) {
-                    androidx.compose.material3.RadioButton(selected = quality == options.quality, onClick = null)
-                    Spacer(Modifier.width(12.dp))
-                    Text(quality.label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                    Text("~${quality.megabytesPerHour} MB/h", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+            Spacer(Modifier.height(6.dp))
+            // A radio group must be announced as a group, otherwise a screen reader says "not selected" with no context.
+            Column(Modifier.selectableGroup()) {
+                AudioQuality.entries.forEach { quality ->
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = options?.quality == quality,
+                                role = Role.RadioButton,
+                                onClick = { viewModel.setQuality(quality) },
+                            )
+                            .heightIn(min = 56.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = options?.quality == quality, onClick = null)
+                        Spacer(Modifier.width(12.dp))
+                        Text(quality.label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+                        Text("~${quality.megabytesPerHour} MB/h", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.secondary)
+                    }
                 }
             }
             HorizontalDivider(Modifier.padding(vertical = 8.dp))
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Text("Prefer Bluetooth microphone", style = MaterialTheme.typography.bodyMedium); Text("Android 12+ when available. Otherwise follows system routing.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary) }
-                Switch(modifier = Modifier.semantics { contentDescription = "Prefer Bluetooth microphone" }, checked = options.bluetooth, onCheckedChange = { enabled ->
-                    if (enabled && Build.VERSION.SDK_INT >= 31 && ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) bluetoothPermission.launch(Manifest.permission.BLUETOOTH_CONNECT) else viewModel.setBluetooth(enabled)
-                })
+                Column(Modifier.weight(1f)) {
+                    Text("Prefer Bluetooth microphone", style = MaterialTheme.typography.bodyMedium)
+                    Text("Android 12+ when available. Otherwise follows system routing.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                }
+                Switch(
+                    modifier = Modifier.semantics { contentDescription = "Prefer Bluetooth microphone" },
+                    checked = options?.bluetooth == true,
+                    enabled = options != null,
+                    onCheckedChange = { enabled ->
+                        if (enabled && Build.VERSION.SDK_INT >= 31 && ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                            bluetoothPermission.launch(Manifest.permission.BLUETOOTH_CONNECT)
+                        } else {
+                            viewModel.setBluetooth(enabled)
+                        }
+                    },
+                )
             }
         }
         Spacer(Modifier.height(12.dp))
-        ContentCard("Audio retention") {
+        AtlasCard(title = "Audio retention") {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) { Text("Delete audio after notes are saved", style = MaterialTheme.typography.bodyMedium); Text("Keep notes and transcript. Turn off to keep recordings for playback.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary) }
-                Switch(modifier = Modifier.semantics { contentDescription = "Delete audio after notes are saved" }, checked = options.deleteAfterNotes, onCheckedChange = viewModel::setDeleteAfterNotes)
+                Column(Modifier.weight(1f)) {
+                    Text("Delete audio after notes are saved", style = MaterialTheme.typography.bodyMedium)
+                    Text("Keep notes and transcript. Turn off to keep recordings for playback.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+                }
+                Switch(
+                    modifier = Modifier.semantics { contentDescription = "Delete audio after notes are saved" },
+                    checked = options?.deleteAfterNotes == true,
+                    enabled = options != null,
+                    onCheckedChange = viewModel::setDeleteAfterNotes,
+                )
             }
         }
         Spacer(Modifier.height(12.dp))
-        ContentCard("OpenRouter") {
-            Text(if (hasSavedKey) "A key is stored securely on this device." else "Add your own OpenRouter key. It is encrypted with Android Keystore and never included in the app build.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary)
+        AtlasCard(title = "OpenRouter") {
+            Text(
+                if (hasSavedKey) "A key is stored securely on this device." else "Add your own OpenRouter key. It is encrypted with Android Keystore and never included in the app build.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.secondary,
+            )
             Spacer(Modifier.height(14.dp))
             OutlinedTextField(
-                value = apiKey, onValueChange = { apiKey = it.trim() }, modifier = Modifier.fillMaxWidth(),
+                value = apiKey,
+                // Trimming on every keystroke would stop the user typing a space; the store trims on save.
+                onValueChange = { apiKey = it },
+                modifier = Modifier.fillMaxWidth(),
                 label = { Text(if (hasSavedKey) "Replace API key" else "OpenRouter API key") },
-                placeholder = { Text("sk-or-…") }, singleLine = true,
+                placeholder = { Text("sk-or-…") },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
                 visualTransformation = if (showKey) androidx.compose.ui.text.input.VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                 trailingIcon = {
                     IconButton(onClick = { showKey = !showKey }) {
-                        Icon(if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility, contentDescription = if (showKey) "Hide API key" else "Show API key")
+                        Icon(
+                            if (showKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = if (showKey) "Hide API key" else "Show API key",
+                        )
                     }
                 },
             )
@@ -884,16 +1212,25 @@ private fun SettingsScreen(viewModel: HomeViewModel, onBack: () -> Unit) {
                 onClick = { viewModel.saveApiKey(apiKey) { apiKey = ""; showKey = false } },
                 enabled = apiKey.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(16.dp),
             ) { Text("Save key on this device") }
-            if (hasSavedKey) TextButton(onClick = { viewModel.deleteApiKey() }, modifier = Modifier.align(Alignment.End)) { Text("Remove saved key", color = MaterialTheme.colorScheme.error) }
+            if (hasSavedKey) {
+                TextButton(onClick = { viewModel.deleteApiKey() }, modifier = Modifier.align(Alignment.End)) {
+                    Text("Remove saved key", color = MaterialTheme.colorScheme.error)
+                }
+            }
         }
         Spacer(Modifier.height(12.dp))
-        ContentCard("Models") {
-            Text("Summary and mind map default to OpenRouter's free-model router. Transcription defaults to Whisper, which may be billed by audio duration. Check current model pricing before processing.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary)
+        AtlasCard(title = "Models") {
+            Text(
+                "Summary and mind map default to OpenRouter's free-model router. Transcription defaults to Whisper, which may be billed by audio duration. Check current model pricing before processing.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.secondary,
+            )
             Spacer(Modifier.height(10.dp))
-            OutlinedTextField(value = model, onValueChange = { model = it.trim() }, modifier = Modifier.fillMaxWidth(), label = { Text("Summary & mind map · free default") }, singleLine = true)
+            OutlinedTextField(value = model, onValueChange = { model = it.trim() }, modifier = Modifier.fillMaxWidth(), label = { Text("Summary & mind map · free default") }, singleLine = true, shape = RoundedCornerShape(14.dp))
             Spacer(Modifier.height(8.dp))
-            OutlinedTextField(value = transcriptionModel, onValueChange = { transcriptionModel = it.trim() }, modifier = Modifier.fillMaxWidth(), label = { Text("Transcription model · may cost") }, singleLine = true)
+            OutlinedTextField(value = transcriptionModel, onValueChange = { transcriptionModel = it.trim() }, modifier = Modifier.fillMaxWidth(), label = { Text("Transcription model · may cost") }, singleLine = true, shape = RoundedCornerShape(14.dp))
             if (!modelsValid) {
                 Spacer(Modifier.height(6.dp))
                 Text("Both model names are required before these choices can be saved.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
@@ -902,21 +1239,29 @@ private fun SettingsScreen(viewModel: HomeViewModel, onBack: () -> Unit) {
             OutlinedButton(onClick = { viewModel.saveModels(model, transcriptionModel) }, enabled = modelsValid, modifier = Modifier.fillMaxWidth()) { Text("Save model choices") }
         }
         message?.let { text ->
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
             Surface(
                 color = if (messageIsError) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer,
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(14.dp),
             ) {
                 Text(
                     text,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 13.dp, vertical = 11.dp).semantics { liveRegion = androidx.compose.ui.semantics.LiveRegionMode.Polite },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                        .semantics { liveRegion = LiveRegionMode.Polite },
                     style = MaterialTheme.typography.bodySmall,
                     color = if (messageIsError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer,
                 )
             }
         }
         Spacer(Modifier.height(14.dp))
-        Text("Audio and transcript are sent to OpenRouter only when you create notes. The free model default applies to summary and mind map; transcription may cost money. Your audio retention choice takes effect after notes are saved.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.padding(horizontal = 2.dp))
+        Text(
+            "Audio and transcript are sent to OpenRouter only when you create notes. The free model default applies to summary and mind map; transcription may cost money. Your audio retention choice takes effect after notes are saved.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.secondary,
+            modifier = Modifier.padding(horizontal = 2.dp),
+        )
         Spacer(Modifier.height(22.dp))
         Text(
             "Meeting Atlas ${BuildConfig.VERSION_NAME}" + if (BuildConfig.DEBUG) " · debug build" else "",

@@ -17,6 +17,8 @@ enum class AudioQuality(val label: String, val bitRate: Int, val sampleRate: Int
     STORAGE_SAVER("Storage saver", 24000, 16000), BALANCED("Balanced", 48000, 24000), HIGH("High quality", 96000, 48000);
     val megabytesPerHour: Int get() = bitRate * 3600 / 8 / 1000000
     val segmentBytes: Long get() = bitRate.toLong() * 20 * 60 / 8
+    /** Independent duration bound for a single segment, in milliseconds. */
+    val segmentMillis: Int get() = 20 * 60 * 1000
 }
 
 data class RecordingOptions(val quality: AudioQuality = AudioQuality.BALANCED, val bluetooth: Boolean = false, val deleteAfterNotes: Boolean = true)

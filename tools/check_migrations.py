@@ -13,6 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SCHEMAS = ROOT / "app/schemas/com.meetingatlas.data.MeetingDatabase"
 MODULE = ROOT / "app/src/main/java/com/meetingatlas/di/StorageModule.kt"
 
+# The target version is derived from the exported schemas, never hard-coded, so a
+# future database bump cannot silently leave this checker verifying an old chain.
+SCHEMA_VERSIONS = sorted(int(p.stem) for p in SCHEMAS.glob("*.json") if p.stem.isdigit())
+LATEST = max(SCHEMA_VERSIONS) if SCHEMA_VERSIONS else 0
+
 
 def fresh(version):
     db = sqlite3.connect(":memory:")
@@ -28,11 +33,15 @@ def fresh(version):
 
 def migrate(db, start):
     source = MODULE.read_text()
-    for version in range(start, 4):
-        block = source.split(f"val MIGRATION_{version}_{version + 1} =", 1)[1].split("\n    }", 1)[0]
+    for version in range(start, LATEST):
+        marker = f"val MIGRATION_{version}_{version + 1} ="
+        if marker not in source:
+            raise AssertionError(f"Missing {marker} in {MODULE.name}")
+        # The block runs until the matching closing brace at the declaration's indent.
+        block = source.split(marker, 1)[1].split("\n    }", 1)[0]
         statements = re.findall(r'db\.execSQL\(("(?:[^"\\]|\\.)*")\)', block)
         if not statements:
-            raise AssertionError("Migration SQL not found")
+            raise AssertionError(f"Migration SQL not found for {version} -> {version + 1}")
         with db:
             for statement in statements:
                 db.execute(json.loads(statement))
@@ -51,10 +60,10 @@ def signature(db):
 
 
 class MigrationChecks(unittest.TestCase):
-    def test_versions_one_two_and_three_match_version_four_and_keep_evidence(self):
-        expected = fresh(4)
+    def test_every_version_migrates_to_the_latest_and_keeps_evidence(self):
+        expected = fresh(LATEST)
         try:
-            for version in (1, 2, 3):
+            for version in range(1, LATEST):
                 with self.subTest(version=version), fresh(version) as db:
                     db.execute("INSERT INTO meetings (id,title,createdAt,durationMs,recordingStatus,pinned,updatedAt) VALUES ('existing','Existing meeting',1,1234,'SAVED',0,1)")
                     db.execute("INSERT INTO audio_segments VALUES ('part','existing',1,'/test.m4a',0,1234,4096,'FINALIZED')")
@@ -70,8 +79,17 @@ class MigrationChecks(unittest.TestCase):
         finally:
             expected.close()
 
+    def test_a_migration_exists_for_every_schema_version(self):
+        source = MODULE.read_text()
+        for version in range(1, LATEST):
+            self.assertIn(
+                f"val MIGRATION_{version}_{version + 1} =",
+                source,
+                f"missing migration for schema version {version}",
+            )
+
     def test_orphan_metadata_is_rejected_and_explicit_delete_cascades(self):
-        db = fresh(4)
+        db = fresh(LATEST)
         try:
             with self.assertRaises(sqlite3.IntegrityError):
                 db.execute("INSERT INTO bookmarks VALUES ('mark','missing',12,'label',1)")

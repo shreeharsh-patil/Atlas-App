@@ -11,7 +11,15 @@ object KnowledgeContext {
     private fun tokens(text: String) = words.findAll(text.lowercase(Locale.ROOT)).map { it.value }.filterNot { it in stop }.toSet()
     fun topics(topics: List<NoteTopicEntity>, source: String): List<NoteTopicEntity> {
         val query = tokens(source)
-        return topics.sortedWith(compareByDescending<NoteTopicEntity> { tokens(it.title + " " + it.topicKey.replace('_', ' ')).count { word -> word in query } }.thenByDescending { it.position }).take(64)
+        // Only topics that share at least one meaningful word are relevant. Returning every
+        // topic regardless would fill the prompt with unrelated subjects.
+        val relevant = topics.filter { candidate ->
+            tokens(candidate.title + " " + candidate.topicKey.replace('_', ' ')).any { word -> word in query }
+        }
+        return relevant.sortedWith(
+            compareByDescending<NoteTopicEntity> { tokens(it.title).count { word -> word in query } }
+                .thenByDescending { it.position },
+        ).take(16)
     }
     fun entries(entries: List<NoteEntryEntity>, topics: List<NoteTopicEntity>, source: String): List<PriorEntry> {
         val query = tokens(source)

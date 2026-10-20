@@ -11,8 +11,16 @@ class RecordingRecoveryManager(context: Context, private val db: MeetingDatabase
     private val inspector = SegmentInspector()
 
     suspend fun recoverInterruptedSessions() = withContext(Dispatchers.IO) {
-        if (!AudioWorkCoordinator.startRecovery()) return@withContext
+        val owner = AudioWorkCoordinator.startRecovery() ?: return@withContext
         try {
+            // Directories that no meeting row owns any more are invisible to the user and to
+            // the app. A crash between deleting the row and deleting the files leaves them
+            // behind, so they are swept here.
+            val known = db.meetingDao().allIds().toSet()
+            files.orphanDirectories(known).forEach { orphan ->
+                orphan.listFiles()?.forEach { runCatching { it.delete() } }
+                runCatching { orphan.delete() }
+            }
             for (meeting in db.meetingDao().unfinished()) {
                 val candidates = files.segments(meeting.id)
                 val previous = db.recordingJournalDao().session(meeting.id)
@@ -34,6 +42,6 @@ class RecordingRecoveryManager(context: Context, private val db: MeetingDatabase
                     db.recordingJournalDao().event(RecordingEventEntity(meetingId = meeting.id, type = "RECOVERED", detail = "valid=${valid.size}; invalid=${entries.size - valid.size}; duration=$offset"))
                 }
             }
-        } finally { AudioWorkCoordinator.finishRecovery() }
+        } finally { AudioWorkCoordinator.finishRecovery(owner) }
     }
 }

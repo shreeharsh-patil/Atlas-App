@@ -18,22 +18,37 @@ class MediaRecorderEngine(private val context: Context) {
                     codec.getCapabilitiesForType(MediaFormat.MIMETYPE_AUDIO_AAC).audioCapabilities?.let { it.isSampleRateSupported(rate) && it.bitrateRange.contains(quality.bitRate) } == true
             } }.getOrDefault(true)
         }
+        // The audio source is part of the fallback matrix: VOICE_COMMUNICATION is refused on
+        // some builds and while a call is active, and MIC applies aggressive processing that
+        // attenuates quiet speech in meetings.
+        val sources = if (bluetooth) {
+            listOf(MediaRecorder.AudioSource.VOICE_COMMUNICATION, MediaRecorder.AudioSource.VOICE_RECOGNITION, MediaRecorder.AudioSource.MIC)
+        } else {
+            listOf(MediaRecorder.AudioSource.VOICE_RECOGNITION, MediaRecorder.AudioSource.MIC)
+        }
         var last: Exception? = null
-        // A device can reject rollover. Retain a single file and report the limitation in the journal.
-        for (rollover in listOf(true, false)) for (rate in rates.map { it as Int? } + listOf(null)) {
-            @Suppress("DEPRECATION") val recorder = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(context) else MediaRecorder()
-            try {
-                recorder.setAudioSource(if (bluetooth) MediaRecorder.AudioSource.VOICE_COMMUNICATION else MediaRecorder.AudioSource.MIC)
-                recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
-                recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-                recorder.setAudioChannels(1)
-                rate?.let { recorder.setAudioSamplingRate(it) }
-                recorder.setAudioEncodingBitRate(quality.bitRate)
-                recorder.setOutputFile(file.absolutePath)
-                if (rollover) recorder.setMaxFileSize(quality.segmentBytes)
-                recorder.prepare()
-                return recorder to EncoderConfiguration(rate, quality.bitRate, rollover)
-            } catch (failure: Exception) { last = failure; runCatching { recorder.release() } }
+        // The most likely configuration is tried first: a device that can roll over and a
+        // supported sample rate should not be delayed by a full matrix of failures.
+        for (rate in rates.map { it as Int? } + listOf(null)) {
+            for (rollover in listOf(true, false)) {
+                for (source in sources) {
+                    @Suppress("DEPRECATION") val recorder = if (Build.VERSION.SDK_INT >= 31) MediaRecorder(context) else MediaRecorder()
+                    try {
+                        recorder.setAudioSource(source)
+                        recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+                        recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+                        recorder.setAudioChannels(1)
+                        rate?.let { recorder.setAudioSamplingRate(it) }
+                        recorder.setAudioEncodingBitRate(quality.bitRate)
+                        recorder.setOutputFile(file.absolutePath)
+                        if (rollover) recorder.setMaxFileSize(quality.segmentBytes)
+                        // A duration bound is independent of the encoder's bit-rate accuracy.
+                        recorder.setMaxDuration(quality.segmentMillis)
+                        recorder.prepare()
+                        return recorder to EncoderConfiguration(rate, quality.bitRate, rollover)
+                    } catch (failure: Exception) { last = failure; runCatching { recorder.release() } }
+                }
+            }
         }
         throw last ?: IllegalStateException("No compatible AAC recorder is available")
     }

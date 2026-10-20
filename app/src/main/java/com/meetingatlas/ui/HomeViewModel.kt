@@ -9,6 +9,7 @@ import com.meetingatlas.data.MeetingEntity
 import com.meetingatlas.data.MeetingRepository
 import com.meetingatlas.data.MeetingDatabase
 import com.meetingatlas.recording.RecordingPreferences
+import com.meetingatlas.recording.RecordingOptions
 import com.meetingatlas.recording.AudioQuality
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -55,7 +56,13 @@ class HomeViewModel @Inject constructor(
     }
     private val _hasOpenRouterKey = MutableStateFlow(processingRepository.settings().hasApiKey)
     val hasOpenRouterKey: StateFlow<Boolean> = _hasOpenRouterKey
-    val recordingOptions = recordingPreferences.options.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), com.meetingatlas.recording.RecordingOptions())
+    /**
+     * `null` means "the stored preferences have not been read yet". Showing the built-in
+     * defaults in the meantime would tell the user that source audio is deleted after notes
+     * when their actual setting is the opposite.
+     */
+    val recordingOptions: StateFlow<RecordingOptions?> = recordingPreferences.options
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
     private val _localError = MutableStateFlow<String?>(null)
     val localError: StateFlow<String?> = _localError
     fun clearLocalError() { _localError.value = null }
@@ -92,13 +99,18 @@ class HomeViewModel @Inject constructor(
     fun setBluetooth(enabled: Boolean) = localChange { recordingPreferences.setBluetooth(enabled) }
     fun setDeleteAfterNotes(enabled: Boolean) = localChange { recordingPreferences.setDeleteAfterNotes(enabled) }
     fun deleteMeeting(id: String, onDeleted: () -> Unit) = localChange {
-        check(com.meetingatlas.recording.AudioWorkCoordinator.startProcessing()) { "Audio is busy" }
+        val owner = com.meetingatlas.recording.AudioWorkCoordinator.startProcessing()
+        check(owner != null) { "Audio is busy" }
         try {
             com.meetingatlas.playback.PlaybackInvalidation.invalidate(id)
-            withContext(Dispatchers.IO) { check(files.deleteMeetingAudio(id, files.segments(id))) }
+            // The row is only removed once the audio files are gone, so a failed delete
+            // leaves the meeting recoverable instead of orphaning its files.
+            withContext(Dispatchers.IO) { check(files.deleteMeetingAudio(id, files.segments(id))) { "The recording files could not be removed. Nothing was deleted." } }
             database.meetingDao().delete(id)
-            onDeleted()
-        } finally { com.meetingatlas.recording.AudioWorkCoordinator.finishProcessing() }
+        } finally { com.meetingatlas.recording.AudioWorkCoordinator.finishProcessing(owner) }
+        // Navigate only after the process gate is released, so the next screen is not
+        // blocked by a lock this screen is still holding.
+        onDeleted()
     }
 
     fun observeAnalysis(id: String) = processingRepository.observeAnalysis(id)
@@ -109,29 +121,44 @@ class HomeViewModel @Inject constructor(
         if (key.isBlank()) { settingsResult("Enter an OpenRouter key before saving.", isError = true); return }
         viewModelScope.launch {
             _settingsMessage.value = null
-            runCatching { withContext(Dispatchers.IO) { processingRepository.saveApiKey(key) } }
-                .onSuccess {
-                    _hasOpenRouterKey.value = true
-                    settingsResult("Key saved on this device.", isError = false)
-                    onSaved()
-                }
-                .onFailure { settingsResult(it.message ?: "Could not save the key.", isError = true) }
+            try {
+                withContext(Dispatchers.IO) { processingRepository.saveApiKey(key) }
+                _hasOpenRouterKey.value = true
+                settingsResult("Key saved on this device.", isError = false)
+                onSaved()
+            } catch (cancelled: CancellationException) {
+                // Never convert a cancellation into a user-visible error.
+                throw cancelled
+            } catch (failure: Exception) {
+                settingsResult(failure.message ?: "Could not save the key.", isError = true)
+            }
         }
     }
 
     fun deleteApiKey() {
         viewModelScope.launch(Dispatchers.IO) {
-            runCatching { processingRepository.deleteApiKey() }
-                .onSuccess { _hasOpenRouterKey.value = false; settingsResult("OpenRouter key removed.", isError = false) }
-                .onFailure { settingsResult(it.message ?: "Could not remove the key.", isError = true) }
+            try {
+                processingRepository.deleteApiKey()
+                _hasOpenRouterKey.value = false
+                settingsResult("OpenRouter key removed.", isError = false)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                settingsResult(failure.message ?: "Could not remove the key.", isError = true)
+            }
         }
     }
 
     fun saveModels(model: String, transcriptionModel: String) {
         viewModelScope.launch {
-            runCatching { withContext(Dispatchers.IO) { processingRepository.saveModels(model, transcriptionModel) } }
-                .onSuccess { settingsResult("Model choices saved.", isError = false) }
-                .onFailure { settingsResult("Model choices could not be saved. Try again.", isError = true) }
+            try {
+                withContext(Dispatchers.IO) { processingRepository.saveModels(model, transcriptionModel) }
+                settingsResult("Model choices saved.", isError = false)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                settingsResult("Model choices could not be saved. Try again.", isError = true)
+            }
         }
     }
     fun clearSettingsMessage() {
@@ -166,15 +193,19 @@ class HomeViewModel @Inject constructor(
 
     fun clearProcessing() { if (!_processing.value.running) _processing.value = ProcessingUiState() }
 
-    private var creatingMeeting = false
+    private val _creatingMeeting = MutableStateFlow(false)
+
+    /** True while a draft meeting is being written, so the start button can be disabled. */
+    val creatingMeeting: StateFlow<Boolean> = _creatingMeeting
+
     fun createMeeting(onCreated: (MeetingEntity) -> Unit) {
         // A rapid double tap must not create two draft meetings.
-        if (creatingMeeting) return
-        creatingMeeting = true
+        if (_creatingMeeting.value) return
+        _creatingMeeting.value = true
         // A dated default keeps the library readable; every meeting used to be called "Untitled meeting".
         val stamp = java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(java.util.Date())
         localChange {
-            try { onCreated(repository.create("Meeting · $stamp")) } finally { creatingMeeting = false }
+            try { onCreated(repository.create("Meeting · $stamp")) } finally { _creatingMeeting.value = false }
         }
     }
 

@@ -18,6 +18,10 @@ interface MeetingDao {
     @Query("SELECT * FROM meetings WHERE recordingStatus IN ('RECORDING', 'PAUSED', 'PREPARING')")
     suspend fun unfinished(): List<MeetingEntity>
 
+    /** Every known meeting id, used to find recording directories that no row owns. */
+    @Query("SELECT id FROM meetings")
+    suspend fun allIds(): List<String>
+
     @Upsert
     suspend fun upsert(meeting: MeetingEntity)
 
@@ -35,9 +39,6 @@ interface MeetingDao {
 
     @Query("UPDATE meetings SET recordingStatus = :status, updatedAt = :updatedAt WHERE id = :id")
     suspend fun setStatus(id: String, status: RecordingStatus, updatedAt: Long)
-
-    @Query("UPDATE meetings SET recordingStatus = 'INTERRUPTED', updatedAt = :now WHERE recordingStatus IN ('RECORDING', 'PAUSED', 'PREPARING')")
-    suspend fun markUnfinishedInterrupted(now: Long)
 }
 
 @Dao
@@ -56,4 +57,8 @@ interface AudioSegmentDao {
 
     @Query("DELETE FROM audio_segments WHERE meetingId = :meetingId")
     suspend fun deleteForMeeting(meetingId: String)
+
+    /** Remove a single segment row, used when an allocated file never received audio. */
+    @Query("DELETE FROM audio_segments WHERE meetingId = :meetingId AND sequence = :sequence")
+    suspend fun deleteSegment(meetingId: String, sequence: Int)
 }

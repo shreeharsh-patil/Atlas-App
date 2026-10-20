@@ -36,20 +36,37 @@ class NotesRepository @Inject constructor(private val db: MeetingDatabase) {
         val snapshot = state.revision + 1
         val topics = dao.topics(job.meetingId).associateBy { it.topicKey }.toMutableMap()
         val existing = dao.entries(job.meetingId).toMutableList()
+        // A model key that was folded into an existing entry is remembered so a later
+        // supersedesKey referring to the new key still resolves.
+        val keyAliases = mutableMapOf<String, String>()
         sources.forEach { source ->
             val stored = requireNotNull(dao.source(source.id))
             check(stored.meetingId == job.meetingId && stored.revision == source.revision && stored.text == source.text) { "Transcript evidence changed while notes were generated. Retry with the current transcript." }
         }
         NotesValidator.validate(patch, sources, topics.keys, existing.map { it.entryKey }.toSet(), job.topicId?.let { dao.topic(it)?.topicKey })
-        for (topic in patch.topics) if (topic.key !in topics) {
-            val row = NoteTopicEntity(stableNoteId(job.meetingId, "topic", topic.key), job.meetingId, topic.key, topic.title, topics.size)
-            dao.saveTopics(listOf(row)); topics[topic.key] = row
+        val scopedTopicKey = job.topicId?.let { dao.topic(it)?.topicKey }
+        for (topic in patch.topics) {
+            val known = topics[topic.key]
+            when {
+                known == null -> {
+                    val row = NoteTopicEntity(stableNoteId(job.meetingId, "topic", topic.key), job.meetingId, topic.key, topic.title, topics.size)
+                    dao.saveTopics(listOf(row)); topics[topic.key] = row
+                }
+                // A refresh may improve the title of the topic it is scoped to.
+                job.topicId == null || topic.key == scopedTopicKey -> {
+                    val updated = known.copy(title = topic.title)
+                    dao.saveTopics(listOf(updated)); topics[topic.key] = updated
+                }
+                // Topics outside the refresh scope are ignored, not fatal.
+                else -> Unit
+            }
         }
         for (change in patch.entries) {
             val topic = requireNotNull(topics[change.topicKey])
             val previous = existing.firstOrNull { it.entryKey == change.key } ?: existing.firstOrNull { it.topicId == topic.id && it.section == change.section.name && canonicalText(it.text) == canonicalText(change.text) }
             require(previous == null || (previous.topicId == topic.id && previous.section == change.section.name)) { "A stable note key was reused for a different section or topic" }
             val id = previous?.id ?: stableNoteId(job.meetingId, "entry", change.key)
+            if (previous != null && previous.entryKey != change.key) keyAliases[change.key] = previous.entryKey
             val oldSources = previous?.let { dao.evidenceForEntry(it.id) }.orEmpty()
             val owner = change.owner ?: previous?.owner
             val deadline = change.deadline ?: previous?.deadline
@@ -61,7 +78,13 @@ class NotesRepository @Inject constructor(private val db: MeetingDatabase) {
             val row = NoteEntryEntity(id, job.meetingId, previous?.entryKey ?: change.key, topic.id, change.section.name, change.text, max(previous?.importance ?: 0, change.importance), owner, deadline,
                 if (change.uncertain) "UNCERTAIN" else "SOURCE_LINKED", false, previous?.highlighted ?: false, previous?.completed ?: false, previous?.inMap ?: (change.importance >= 2), number, previous?.supersededBy, System.currentTimeMillis(), previous?.displayOrder ?: existing.size)
             if (previous == null || !isCandidate) {
-                val appliedRow = if (previous?.userEdited == true) row.copy(userEdited = true, verification = "USER_EDITED") else row
+                // A user-edited note keeps its marker, but an uncertain model claim must
+                // stay visibly uncertain.
+                val appliedRow = if (previous?.userEdited == true) {
+                    row.copy(userEdited = true, verification = if (row.verification == "UNCERTAIN") "UNCERTAIN" else "USER_EDITED")
+                } else {
+                    row
+                }
                 dao.saveEntry(appliedRow)
                 existing.removeAll { it.id == id }; existing += appliedRow
             }
@@ -71,7 +94,8 @@ class NotesRepository @Inject constructor(private val db: MeetingDatabase) {
             val incoming = change.sources.map { ref -> NoteEvidenceEntity(revision.id, ref.sourceId, requireNotNull(sources.firstOrNull { it.id == ref.sourceId }).revision, ref.quote) }
             dao.evidence((retained + incoming).associateBy { it.transcriptId }.values.toList())
             change.supersedesKey?.let { key ->
-                val old = existing.firstOrNull { it.entryKey == key } ?: error("Revised entry was not found")
+                val resolved = keyAliases[key] ?: key
+                val old = existing.firstOrNull { it.entryKey == resolved } ?: error("Revised entry was not found")
                 require(old.id != id && old.section == row.section && row.section in setOf("DECISION", "ACTION") && old.supersededBy == null && row.supersededBy == null) { "Invalid revised decision or action" }
                 if (!isCandidate && !old.userEdited) {
                     dao.supersede(old.id, id)

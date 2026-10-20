@@ -33,6 +33,17 @@ class NotesEngineTest {
         rejects { NotesValidator.validate(base.copy(entries = base.entries.mapIndexed { i, e -> if (i == 0) e.copy(sources = listOf(EvidenceRef("other-meeting", e.text))) else e }), sources) }
         rejects { NotesValidator.validate(base.copy(entries = base.entries.mapIndexed { i, e -> if (i == 0) e.copy(sources = listOf(EvidenceRef("opening", "We agreed to launch tomorrow."))) else e }), sources) }
     }
+    @Test fun typographicQuotesAndRepeatedWhitespaceAreTolerated() {
+        // Models routinely convert straight quotes into typographic ones and collapse or
+        // expand whitespace. Such a quote still points at the same transcript text.
+        val base = patch()
+        val cosmetic = base.copy(entries = base.entries.map { entry ->
+            entry.copy(sources = entry.sources.map { ref ->
+                ref.copy(quote = "“" + ref.quote.replace(" ", "  ") + "”")
+            })
+        })
+        NotesValidator.validate(cosmetic, sources)
+    }
     @Test fun rejectsInferredOwnerOrDeadlineEvenWithValidTranscriptCitation() {
         val base = patch()
         rejects { NotesValidator.validate(base.copy(entries = base.entries.map { if (it.section == NoteSection.ACTION) it.copy(owner = "Maya") else it }), sources) }

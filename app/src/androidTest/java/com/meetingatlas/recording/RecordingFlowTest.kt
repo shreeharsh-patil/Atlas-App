@@ -30,12 +30,15 @@ class RecordingFlowTest {
         val id = UUID.randomUUID().toString()
         val files = RecordingFileManager(context)
         fun control(action: String) { instrumentation.runOnMainSync { context.startService(Intent(context, MeetingRecordingService::class.java).setAction(action)) } }
+        fun start() { instrumentation.runOnMainSync { ContextCompat.startForegroundService(context, Intent(context, MeetingRecordingService::class.java).setAction(MeetingRecordingService.ACTION_START).putExtra(MeetingRecordingService.EXTRA_MEETING_ID, id)) } }
         try {
             delay(500)
             database.meetingDao().upsert(MeetingEntity(id, "Recording integration check", System.currentTimeMillis()))
-            instrumentation.runOnMainSync { ContextCompat.startForegroundService(context, Intent(context, MeetingRecordingService::class.java).setAction(MeetingRecordingService.ACTION_START).putExtra(MeetingRecordingService.EXTRA_MEETING_ID, id)) }
+            start()
             withTimeout(20000) { RecordingProcessState.state.first { it is RecordingState.Recording && it.meetingId == id } }
+            start() // A duplicate command must leave the original capture, notification and row alive.
             delay(2500)
+            assertEquals(RecordingStatus.RECORDING, database.meetingDao().findById(id)?.recordingStatus)
             control(MeetingRecordingService.ACTION_PAUSE)
             val paused = withTimeout(10000) { RecordingProcessState.state.first { it is RecordingState.Paused && it.meetingId == id } } as RecordingState.Paused
             delay(1000)

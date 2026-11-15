@@ -33,8 +33,8 @@ android {
         applicationId = "com.meetingatlas"
         minSdk = 26
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.5.0"
+        versionCode = 7
+        versionName = "0.6.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // x86/x86_64 are emulator-only; x86_64 is kept for ChromeOS.
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64") }

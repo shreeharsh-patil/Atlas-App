@@ -25,9 +25,21 @@ object AudioWorkCoordinator {
 
     @Synchronized fun finishRecording(id: String) { if (active.value == id) active.value = null }
 
+    // Dictation shares microphone ownership, but does not touch meeting files or their locks.
+    @Synchronized fun startDictation(id: String): Boolean {
+        require(id.startsWith("dictation:"))
+        if (active.value != null) return false
+        active.value = id
+        return true
+    }
+
+    @Synchronized fun finishDictation(id: String) {
+        if (id.startsWith("dictation:") && active.value == id) active.value = null
+    }
+
     /** Acquires the processing lock. The returned owner must be passed to [finishProcessing]. */
     @Synchronized fun startProcessing(): String? {
-        if (processingOwner != null || recoveringOwner != null || active.value != null) return null
+        if (processingOwner != null || recoveringOwner != null || active.value?.startsWith("dictation:") == false) return null
         processingOwner = UUID.randomUUID().toString()
         return processingOwner
     }
@@ -38,7 +50,7 @@ object AudioWorkCoordinator {
 
     /** Acquires the recovery lock. The returned owner must be passed to [finishRecovery]. */
     @Synchronized fun startRecovery(): String? {
-        if (processingOwner != null || recoveringOwner != null || active.value != null) return null
+        if (processingOwner != null || recoveringOwner != null || active.value?.startsWith("dictation:") == false) return null
         recoveringOwner = UUID.randomUUID().toString()
         return recoveringOwner
     }

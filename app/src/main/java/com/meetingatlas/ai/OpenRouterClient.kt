@@ -50,7 +50,11 @@ class OpenRouterClient private constructor(private val http: OkHttpClient, priva
             .addFormDataPart("response_format", "verbose_json")
             .addFormDataPart("timestamp_granularities[]", "segment")
             .addFormDataPart("file", "audio.m4a", audioFile.asRequestBody("audio/mp4".toMediaType())).build()
-        return request("audio/transcriptions", apiKey, body).toString()
+        val result = request("audio/transcriptions", apiKey, body)
+        if ("text" !in result && "segments" !in result) {
+            throw OpenRouterException("The speech provider returned an invalid transcript. Check the selected transcription model.")
+        }
+        return result.toString()
     }
 
     private suspend fun request(path: String, apiKey: String, body: RequestBody): JsonObject {
@@ -78,6 +82,7 @@ class OpenRouterClient private constructor(private val http: OkHttpClient, priva
                                 throw OpenRouterException(detail.replace(token, "[redacted]"), response.code)
                             }
                             val result = parsed ?: throw OpenRouterException("The provider returned unreadable JSON. Saved progress is safe.")
+                            if ("error" in result) throw OpenRouterException("The provider returned an error response. Saved progress is safe.")
                             if (continuation.isActive) continuation.resume(result)
                         } catch (failure: Exception) { if (continuation.isActive) continuation.resumeWithException(failure) }
                     }

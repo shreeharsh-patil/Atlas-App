@@ -41,7 +41,7 @@ object TranscriptNormalizer {
                 val startValue = (rawStart * 1000).toLong()
                 val endValue = (rawEnd * 1000).toLong()
                 require(startValue <= durationMs + TOLERANCE_MS && endValue <= durationMs + TOLERANCE_MS) { "Provider timestamps are outside the saved audio" }
-                localStart = startValue.coerceIn(0, durationMs)
+                localStart = startValue.coerceIn(0, durationMs - 1)
                 localEnd = endValue.coerceIn(localStart + 1, durationMs)
                 // Overlapping or out-of-order segments are tolerated rather than fatal.
                 previousStart = maxOf(previousStart, localStart)

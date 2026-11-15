@@ -41,6 +41,12 @@ class TranscriptAndViewsTest {
         assertEquals("CHUNK", result.precision)
     }
     @Test fun noSpeechDoesNotProduceFakeContent() { assertTrue(TranscriptNormalizer.normalize("""{"text":""}""", "m", 0, 0, 10000).isEmpty()) }
+    @Test fun segmentStartAtAacEndDoesNotProduceAnInvertedInterval() {
+        val source = TranscriptNormalizer.normalize("""{"segments":[{"text":"trailing","start":10.001,"end":10.25}]}""",
+            "m", 1, 4_000, 10_000).single()
+        assertEquals(13_999L, source.startMs)
+        assertEquals(14_000L, source.endMs)
+    }
     private fun item(id: String, section: String, importance: Int = 3, superseded: String? = null) = NoteEntryEntity(id, "m", id, "topic-${id.toInt() % 3}", section, "Recorded detail $id", importance, null, null, "SOURCE_LINKED", false, false, false, true, 1, superseded, id.toLong(), id.toInt())
     @Test fun allFourViewsUseTheSameSavedKnowledgeAndDetailedKeepsTheMiddle() {
         val entries = (0..19).map { item(it.toString(), when (it) { 0 -> "PURPOSE"; 5 -> "DECISION"; 10 -> "FORMULA"; 15 -> "ACTION"; 18 -> "PROPOSAL"; else -> "EXPLANATION" }, if (it % 2 == 0) 1 else 3) }

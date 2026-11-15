@@ -1,11 +1,15 @@
 # Release preparation
 
+Version 0.6.0 (version code 7) adds Android voice dictation and a dedicated Compose interface for setup, history, dictionary, snippets, and settings. Existing meeting data remains in the same database. The [GitHub release](https://github.com/shreeharsh-patil/Atlas-App/releases/tag/v0.6.0) contains the signed APK and SHA-256 checksum for direct installation. See the [dictation implementation](dictation.md) and [visual QA](dictation-ui.md) for current coverage and limitations.
+
+## Historical release: 0.5.0
+
 Version 0.5.0 (version code 6) is the design and reliability release. It introduces the
 Meeting Atlas design system — Lobster and Lobster Two for display type, Lora for reading
 and true italics, Manrope for interface chrome — a hero-led home screen, raised cards and
 a brass accent, plus a wide correctness pass over recording, playback, notes and the build.
 
-## Build outputs
+### Build outputs for 0.5.0
 
 ```powershell
 $env:ANDROID_HOME = 'C:\Users\shree\AppData\Local\Android\Sdk'

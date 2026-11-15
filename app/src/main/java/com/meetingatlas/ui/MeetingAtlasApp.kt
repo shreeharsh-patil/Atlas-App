@@ -112,6 +112,8 @@ import com.meetingatlas.data.BookmarkEntity
 import com.meetingatlas.data.MeetingAnalysisEntity
 import com.meetingatlas.data.MeetingEntity
 import com.meetingatlas.data.RecordingStatus
+import com.meetingatlas.dictation.DictationScreen
+import com.meetingatlas.dictation.flowBackdrop
 import com.meetingatlas.notes.MeetingTemplate
 import com.meetingatlas.recording.AudioQuality
 import com.meetingatlas.recording.RecordingProcessState
@@ -126,14 +128,14 @@ import java.util.Locale
 import org.json.JSONArray
 import org.json.JSONObject
 
-private enum class Destination { HOME, LIBRARY, DETAIL, SETTINGS, RECORDING }
+private enum class Destination { DICTATION, HOME, LIBRARY, DETAIL, SETTINGS, RECORDING }
 private enum class DetailTab { SUMMARY, MAP, TRANSCRIPT }
 
 /** Shared separator for meta lines so the spacing is identical everywhere. */
 internal const val META_SEPARATOR = "  ·  "
 
 @Composable
-fun MeetingAtlasApp(viewModel: HomeViewModel = hiltViewModel()) {
+fun MeetingAtlasApp(viewModel: HomeViewModel = hiltViewModel(), dictationSignal: Int = 0) {
     val meetings by viewModel.meetings.collectAsStateWithLifecycle()
     val recordingState by RecordingProcessState.state.collectAsStateWithLifecycle()
     val meetingsReady by viewModel.meetingsReady.collectAsStateWithLifecycle()
@@ -141,7 +143,7 @@ fun MeetingAtlasApp(viewModel: HomeViewModel = hiltViewModel()) {
 
     // The navigation state objects are held explicitly so the callbacks below can be
     // remembered once instead of being rebuilt on every recomposition.
-    val destinationState = rememberSaveable { mutableStateOf(Destination.HOME) }
+    val destinationState = rememberSaveable { mutableStateOf(Destination.DICTATION) }
     val settingsReturnState = rememberSaveable { mutableStateOf(Destination.HOME) }
     val detailReturnState = rememberSaveable { mutableStateOf(Destination.HOME) }
     val selectedMeetingIdState = rememberSaveable { mutableStateOf<String?>(null) }
@@ -206,16 +208,18 @@ fun MeetingAtlasApp(viewModel: HomeViewModel = hiltViewModel()) {
         }
     }
 
-    BackHandler(destination != Destination.HOME) {
+    LaunchedEffect(dictationSignal) { if (dictationSignal > 0) destination = Destination.DICTATION }
+
+    BackHandler(destination != Destination.DICTATION) {
         destination = when (destination) {
             Destination.SETTINGS -> settingsReturn
             Destination.DETAIL -> detailReturn
             Destination.RECORDING -> leaveRecording()
-            else -> Destination.HOME
+            else -> Destination.DICTATION
         }
     }
 
-    Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    Box(Modifier.fillMaxSize().background(if (destination == Destination.DICTATION) flowBackdrop() else MaterialTheme.colorScheme.background)) {
         // Edge-to-edge windows are not resized for the keyboard, so the IME inset is consumed
         // by the content area only - the bottom navigation bar stays anchored to the screen.
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))) {
@@ -228,10 +232,16 @@ fun MeetingAtlasApp(viewModel: HomeViewModel = hiltViewModel()) {
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.TopCenter) {
                 Box(Modifier.widthIn(max = 920.dp).fillMaxSize()) {
                     when (destination) {
+                        Destination.DICTATION -> DictationScreen(
+                            onMeetings = { destination = Destination.HOME },
+                            onLibrary = { destination = Destination.LIBRARY },
+                            recoverySignal = dictationSignal,
+                        )
                         Destination.HOME -> AtlasScaffold(
                             selected = Destination.HOME,
                             onHome = { destination = Destination.HOME },
                             onLibrary = { destination = Destination.LIBRARY },
+                            onDictation = { destination = Destination.DICTATION },
                         ) {
                             HomeScreen(
                                 meetings = meetings,
@@ -257,6 +267,7 @@ fun MeetingAtlasApp(viewModel: HomeViewModel = hiltViewModel()) {
                             selected = Destination.LIBRARY,
                             onHome = { destination = Destination.HOME },
                             onLibrary = { destination = Destination.LIBRARY },
+                            onDictation = { destination = Destination.DICTATION },
                         ) {
                             LibraryScreen(meetings, onBack = { destination = Destination.HOME }, onMeeting = openMeeting)
                         }
@@ -302,7 +313,7 @@ fun MeetingAtlasApp(viewModel: HomeViewModel = hiltViewModel()) {
 }
 
 @Composable
-private fun AtlasScaffold(selected: Destination, onHome: () -> Unit, onLibrary: () -> Unit, content: @Composable () -> Unit) {
+private fun AtlasScaffold(selected: Destination, onHome: () -> Unit, onLibrary: () -> Unit, onDictation: () -> Unit, content: @Composable () -> Unit) {
     // The bottom bar is hidden while the keyboard is up so it never floats over the IME.
     val imeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
     Scaffold(
@@ -313,6 +324,11 @@ private fun AtlasScaffold(selected: Destination, onHome: () -> Unit, onLibrary: 
                     containerColor = MaterialTheme.colorScheme.surface,
                     tonalElevation = 0.dp,
                 ) {
+                    NavigationBarItem(
+                        selected = false, onClick = onDictation,
+                        icon = { Icon(Icons.Default.Mic, contentDescription = null, modifier = Modifier.size(20.dp)) },
+                        label = { Text("Dictation") },
+                    )
                     NavigationBarItem(
                         selected = selected == Destination.HOME,
                         onClick = onHome,

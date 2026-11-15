@@ -67,6 +67,16 @@ class MeetingRecordingService : Service() {
         val action = intent?.action
         if (action == ACTION_START) {
             val id = intent.getStringExtra(EXTRA_MEETING_ID)
+            if (meetingId != null) {
+                // Already promoted. Never replace this session's notification, update its
+                // own row to FAILED or stop the service for an overlapping start command.
+                if (!id.isNullOrBlank() && id != meetingId) {
+                    scope.launch { db.meetingDao().findById(id)?.takeIf { it.recordingStatus == RecordingStatus.PREPARING }?.let {
+                        db.meetingDao().finish(id, RecordingStatus.FAILED, 0, null, System.currentTimeMillis(), "Another meeting is already recording. Stop it first.")
+                    } }
+                }
+                return START_NOT_STICKY
+            }
             // A service started with startForegroundService() MUST reach startForeground() or
             // Android kills the whole process with ForegroundServiceDidNotStartInTimeException.
             // Promote to the foreground before any early return.
@@ -91,15 +101,6 @@ class MeetingRecordingService : Service() {
                 return START_NOT_STICKY
             }
             if (id.isNullOrBlank()) { stopForeground(STOP_FOREGROUND_REMOVE); stopSelf(startId); return START_NOT_STICKY }
-            if (meetingId != null) {
-                // Another capture owns the microphone. Failing loudly beats dropping the request
-                // and leaving the second meeting stuck on "Preparing".
-                RecordingProcessState.update(RecordingState.Failed(id, "Another meeting is already recording. Stop it first."))
-                scope.launch { runCatching { db.meetingDao().finish(id, RecordingStatus.FAILED, 0, null, System.currentTimeMillis(), "Another meeting is already recording.") } }
-                stopForeground(STOP_FOREGROUND_REMOVE)
-                stopSelf(startId)
-                return START_NOT_STICKY
-            }
             scope.launch { commands.withLock { if (meetingId == null) startRecording(id) } }
         } else if (meetingId != null) {
             scope.launch { commands.withLock {

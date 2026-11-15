@@ -1,3 +1,5 @@
 <resources>
+    <string name="dictation_accessibility_name">Atlas voice dictation</string>
+    <string name="dictation_accessibility_description">Shows a microphone bubble in supported text fields and inserts the spoken text at the original cursor after you dictate. Review the data disclosure in Atlas before enabling.</string>
     <string name="app_name">Meeting Atlas</string>
 </resources>

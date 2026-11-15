@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- An independent editor process for manual overlay and input-connection tests. -->
+        <activity
+            android:name="com.meetingatlas.fixtures.EditorFixtureActivity"
+            android:exported="true"
+            android:label="Atlas Editor QA"
+            android:windowSoftInputMode="adjustResize|stateAlwaysVisible" />
+    </application>
+</manifest>

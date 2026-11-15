@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- This service is not designated as an accessibility tool (the platform default). -->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeViewFocused|typeViewTextChanged|typeViewTextSelectionChanged|typeWindowStateChanged|typeWindowsChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagReportViewIds|flagInputMethodEditor"
+    android:canRetrieveWindowContent="true"
+    android:description="@string/dictation_accessibility_description"
+    android:notificationTimeout="0" />

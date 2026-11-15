@@ -9,6 +9,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- The app records meetings: a device without a microphone cannot run it. -->
     <uses-feature android:name="android.hardware.microphone" android:required="true" />
@@ -38,6 +39,20 @@
             android:name=".recording.MeetingRecordingService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+        <service
+            android:name=".dictation.DictationService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+        <service
+            android:name=".dictation.AtlasAccessibilityService"
+            android:exported="true"
+            android:label="@string/dictation_accessibility_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data android:name="android.accessibilityservice" android:resource="@xml/atlas_accessibility" />
+        </service>
         <!-- Exported so Android Auto, Assistant and the system media controls can bind the
              session. Media3's own template declares it the same way. -->
         <service

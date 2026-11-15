@@ -22,8 +22,10 @@ class NotesScheduler @Inject constructor(@param:ApplicationContext private val c
         val jobId = if (topicId == null) "notes-$meetingId" else "topic-$topicId"
         try {
             val id = pipeline.prepare(meetingId, template, topicId)
-            WorkManager.getInstance(context).enqueueUniqueWork(id, ExistingWorkPolicy.KEEP, request(id, charging)).result.get()
+            WorkManager.getInstance(context).enqueueUniqueWork(id, ExistingWorkPolicy.KEEP, request(id, charging)).await()
             id
+        } catch (cancelled: CancellationException) {
+            throw cancelled
         } catch (failure: Exception) {
             // The failure is persisted so the Notes screen can show it. A job row that only
             // exists in a transient snackbar would leave the screen looking idle.
@@ -33,7 +35,7 @@ class NotesScheduler @Inject constructor(@param:ApplicationContext private val c
     }
     suspend fun cancel(jobId: String) = withContext(Dispatchers.IO) {
         pipeline.markFailure(jobId, "Processing paused. Completed transcript and notes have been kept.", "CANCELLED")
-        WorkManager.getInstance(context).cancelUniqueWork(jobId).result.get()
+        WorkManager.getInstance(context).cancelUniqueWork(jobId).await()
     }
     companion object {
         internal fun request(id: String, charging: Boolean) = OneTimeWorkRequestBuilder<MeetingNotesWorker>()
@@ -59,7 +61,7 @@ class MeetingNotesWorker(context: Context, params: WorkerParameters) : Coroutine
                 }
             }
             // Yield below WorkManager's execution window. The successor starts only after this work succeeds.
-            WorkManager.getInstance(applicationContext).enqueueUniqueWork(jobId, ExistingWorkPolicy.APPEND, NotesScheduler.request(jobId, inputData.getBoolean("charging", false))).result.get()
+            WorkManager.getInstance(applicationContext).enqueueUniqueWork(jobId, ExistingWorkPolicy.APPEND, NotesScheduler.request(jobId, inputData.getBoolean("charging", false))).await()
             Result.success()
         } catch (cancelled: CancellationException) { throw cancelled }
         catch (failure: com.meetingatlas.ai.OpenRouterException) {

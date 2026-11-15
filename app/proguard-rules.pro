@@ -20,6 +20,10 @@
 -keepclassmembers class com.meetingatlas.notes.MeetingNotesWorker {
     public <init>(android.content.Context, androidx.work.WorkerParameters);
 }
+-keepnames class com.meetingatlas.dictation.DictationRetentionWorker
+-keepclassmembers class com.meetingatlas.dictation.DictationRetentionWorker {
+    public <init>(android.content.Context, androidx.work.WorkerParameters);
+}
 
 # Keep annotations readable for Hilt entry points and kotlinx.serialization.
 -keepattributes RuntimeVisibleAnnotations,AnnotationDefault,Signature,InnerClasses,EnclosingMethod

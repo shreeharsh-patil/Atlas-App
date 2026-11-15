@@ -18,8 +18,11 @@ class OpenRouterSettingsStore @Inject constructor(@ApplicationContext context: C
     private val preferences = context.getSharedPreferences("meeting_atlas_ai", Context.MODE_PRIVATE)
     private val encrypted = context.getSharedPreferences("meeting_atlas_ai_secret", Context.MODE_PRIVATE)
 
-    fun apiKey(): String? {
-        val encoded = encrypted.getString(KEY_CIPHER_TEXT, null) ?: return null
+    fun apiKey(): String? = key(false)
+
+    @Synchronized fun key(openAi: Boolean): String? {
+        val slot = secretSlot(openAi)
+        val encoded = encrypted.getString(slot, null) ?: return null
         return try {
             val blob = Base64.decode(encoded, Base64.NO_WRAP)
             require(blob.size > IV_LENGTH) { "Saved OpenRouter key could not be read. Enter it again in Settings." }
@@ -32,19 +35,24 @@ class OpenRouterSettingsStore @Inject constructor(@ApplicationContext context: C
             // The Keystore entry was invalidated (a changed lock screen, a restore to a new
             // device, an OEM keystore fault). The unreadable key is removed so the user is
             // asked for it again instead of seeing a raw crypto exception for ever.
-            runCatching { deleteApiKey() }
-            throw IllegalStateException("Your saved OpenRouter key could not be read. Enter it again in Settings.", failure)
+            runCatching { deleteKey(openAi) }
+            throw IllegalStateException("Your saved API key could not be read. Enter it again in Settings.", failure)
+        } catch (failure: IllegalArgumentException) {
+            runCatching { deleteKey(openAi) }
+            throw IllegalStateException("Your saved API key could not be read. Enter it again in Settings.", failure)
         }
     }
 
-    fun saveApiKey(value: String) {
+    fun saveApiKey(value: String) = saveKey(false, value)
+
+    @Synchronized fun saveKey(openAi: Boolean, value: String) {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, secretKey())
         val blob = cipher.iv + cipher.doFinal(value.trim().toByteArray(Charsets.UTF_8))
         // commit() is used deliberately: the key must be durable before the UI reports success.
         @Suppress("UseKtx")
-        check(encrypted.edit().putString(KEY_CIPHER_TEXT, Base64.encodeToString(blob, Base64.NO_WRAP)).commit()) {
-            "Could not save the OpenRouter key on this device."
+        check(encrypted.edit().putString(secretSlot(openAi), Base64.encodeToString(blob, Base64.NO_WRAP)).commit()) {
+            "Could not save the API key on this device."
         }
     }
 
@@ -54,10 +62,15 @@ class OpenRouterSettingsStore @Inject constructor(@ApplicationContext context: C
      */
     fun hasApiKey(): Boolean = encrypted.contains(KEY_CIPHER_TEXT) && runCatching { apiKey() != null }.getOrDefault(false)
 
-    fun deleteApiKey() {
+    fun deleteApiKey() = deleteKey(false)
+
+    @Synchronized fun deleteKey(openAi: Boolean) {
         @Suppress("UseKtx")
-        check(encrypted.edit().remove(KEY_CIPHER_TEXT).commit()) { "Could not remove the saved key." }
+        check(encrypted.edit().remove(secretSlot(openAi)).commit()) { "Could not remove the saved key." }
     }
+
+    fun hasStoredKey(openAi: Boolean) = encrypted.contains(secretSlot(openAi))
+    private fun secretSlot(openAi: Boolean) = if (openAi) "openai_ciphertext" else KEY_CIPHER_TEXT
 
     fun model(): String = preferences.getString(KEY_MODEL, DEFAULT_MODEL).orEmpty().ifBlank { DEFAULT_MODEL }
     fun saveModels(model: String, transcriptionModel: String) {
